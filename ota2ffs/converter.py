@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 from . import parser_v1, parser_v2
 from .ffs_writer import write_ffs
 from .report_writer import write_conversion_log
-from .utils import FarFieldSource, frequency_to_hz, sanitize_filename
+from .utils import DEFAULT_FREQUENCY_HZ, FarFieldSource, frequency_to_hz, sanitize_filename
 
 
 @dataclass(slots=True)
@@ -43,6 +43,8 @@ def convert_excel(
     result.log_lines.append(f"输出目录: {excel_output_dir}")
     if fallback_frequency_hz is not None:
         result.log_lines.append(f"界面频率[Hz]: {fallback_frequency_hz:g}")
+    else:
+        result.log_lines.append(f"默认频率[Hz]: {DEFAULT_FREQUENCY_HZ:g}")
 
     workbook = load_workbook(excel_path, data_only=True)
     selected_sheets = list(sheet_names) if sheet_names is not None else list(workbook.sheetnames)
@@ -90,5 +92,5 @@ def _frequency_hz_for_source(source: FarFieldSource, fallback_frequency_hz: floa
     if source.frequency_mhz is not None:
         return frequency_to_hz(source.frequency_mhz, "MHz") or 0.0
     if fallback_frequency_hz is None:
-        raise ValueError("缺少频率信息")
+        return DEFAULT_FREQUENCY_HZ
     return fallback_frequency_hz

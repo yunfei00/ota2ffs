@@ -9,6 +9,7 @@ from typing import Any, Iterable
 
 
 FieldMap = dict[tuple[float, float], float]
+DEFAULT_FREQUENCY_HZ = 1_000_000_000.0
 FREQUENCY_UNITS = ("MHz", "GHz", "KHz", "Hz")
 FREQUENCY_UNIT_MULTIPLIERS = {
     "Hz": 1.0,

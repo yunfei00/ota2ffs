@@ -63,7 +63,7 @@ class MainWindow(QMainWindow):
 
         frequency_row = QHBoxLayout()
         self.frequency_edit = QLineEdit()
-        self.frequency_edit.setPlaceholderText("V1 可填写；V2 自动读取表格频率")
+        self.frequency_edit.setPlaceholderText("V1 可填写；留空默认 1e9 Hz；V2 自动读取表格频率")
         self.frequency_unit_combo = QComboBox()
         self.frequency_unit_combo.addItems(FREQUENCY_UNITS)
         self.frequency_unit_combo.setCurrentText("MHz")

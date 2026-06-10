@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TypeAlias
+
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .utils import (
@@ -11,6 +13,9 @@ from .utils import (
     sorted_unique,
     to_float,
 )
+
+
+BlockStart: TypeAlias = tuple[int, int]
 
 
 def is_v1_sheet(ws: Worksheet) -> bool:
@@ -48,19 +53,22 @@ def parse_sheet(ws: Worksheet) -> FarFieldSource:
     )
 
 
-def _find_block(ws: Worksheet, title: str) -> int | None:
+def _find_block(ws: Worksheet, title: str) -> BlockStart | None:
     for row in range(1, ws.max_row + 1):
-        if (
-            is_text(ws.cell(row=row, column=1).value, title)
-            and is_text(ws.cell(row=row, column=2).value, "Phi Angle")
-            and is_text(ws.cell(row=row + 1, column=2).value, "Theta Angle")
-        ):
-            return row
+        for column in range(1, ws.max_column + 1):
+            if (
+                is_text(ws.cell(row=row, column=column).value, title)
+                and is_text(ws.cell(row=row, column=column + 1).value, "Phi Angle")
+                and is_text(ws.cell(row=row + 1, column=column + 1).value, "Theta Angle")
+            ):
+                return row, column
     return None
 
 
-def _parse_block(ws: Worksheet, start_row: int) -> tuple[list[float], list[float], dict[tuple[float, float], float]]:
-    theta_columns = _read_theta_columns(ws, start_row)
+def _parse_block(ws: Worksheet, start: BlockStart) -> tuple[list[float], list[float], dict[tuple[float, float], float]]:
+    start_row, start_column = start
+    angle_column = start_column + 1
+    theta_columns = _read_theta_columns(ws, start_row, start_column + 2)
     if not theta_columns:
         raise ValueError(f"第 {start_row} 行未找到 Theta 角度")
 
@@ -70,7 +78,7 @@ def _parse_block(ws: Worksheet, start_row: int) -> tuple[list[float], list[float
     saw_data = False
 
     for row in range(start_row + 2, ws.max_row + 1):
-        raw_phi = to_float(ws.cell(row=row, column=2).value)
+        raw_phi = to_float(ws.cell(row=row, column=angle_column).value)
         if raw_phi is None:
             if saw_data:
                 break
@@ -91,9 +99,9 @@ def _parse_block(ws: Worksheet, start_row: int) -> tuple[list[float], list[float
     return theta_angles, phi_angles, values
 
 
-def _read_theta_columns(ws: Worksheet, start_row: int) -> list[tuple[int, float]]:
+def _read_theta_columns(ws: Worksheet, start_row: int, first_column: int) -> list[tuple[int, float]]:
     theta_columns: list[tuple[int, float]] = []
-    for column in range(3, ws.max_column + 1):
+    for column in range(first_column, ws.max_column + 1):
         theta = to_float(ws.cell(row=start_row, column=column).value)
         if theta is None:
             if theta_columns:

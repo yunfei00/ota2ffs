@@ -5,7 +5,7 @@ OTA2FFS Converter 是一个 Python 桌面工具，用于将 OTA 暗室测试 Exc
 ## 功能
 
 - 选择一个 Excel 文件。
-- 输入频率并选择单位，支持 `MHz`、`GHz`、`KHz`、`Hz`。V2 数据会优先使用 Excel 表格自带频率。
+- 输入频率并选择单位，支持 `MHz`、`GHz`、`KHz`、`Hz`。V2 数据会优先使用 Excel 表格自带频率，V1 留空默认使用 `1e9 Hz`。
 - 读取一个或多个 sheet。
 - 自动识别每个 sheet 的 V1 或 V2 数据格式。
 - 每个 sheet 独立转换，某个 sheet 失败不会影响其他 sheet。
@@ -49,10 +49,10 @@ Farfield
 头部之后的数据主体为逗号分隔文本，列顺序固定为：
 
 ```text
-Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)
+// Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)
 ```
 
-V2 sheet 会使用表格中自带的频率，单位固定为 `MHz`。V1 sheet 或没有自带频率的数据会使用界面中输入的频率。
+V2 sheet 会使用表格中自带的频率，单位固定为 `MHz`。V1 sheet 或没有自带频率的数据会使用界面中输入的频率；如果界面频率留空，则默认使用 `1e9 Hz`。
 
 其中：
 
@@ -88,6 +88,7 @@ V1 sheet 包含两个数据块：
 - Phi 输出范围补齐为 `0~360`。
 - Theta 输出范围补齐为 `0~180`。
 - 角度步进根据 Excel 实际数据自动识别，不写死为 `15`。
+- V1 数据块可以放在 sheet 内不同起始行列，只要块内相对结构保持一致即可。
 
 ## V2 Excel 格式
 
@@ -107,6 +108,7 @@ V2 sheet 中包含三个表格，每个表格左上角单元格为 `Polarization
 - `Theta + Phi` 合成普通 FFS。
 - `Total` 表格单独生成拓图 FFS，数据写入 `Re(E_Theta)`，`Re(E_Phi)` 全部为 `0`。
 - V2 输出文件头部频率使用表格自带频率，不使用界面输入的频率。
+- V2 三个表格可以放在 sheet 内不同起始行列，只要每个表格内部相对结构保持一致即可。
 
 ## 输出文件命名
 
@@ -124,6 +126,15 @@ V2 sheet 中包含三个表格，每个表格左上角单元格为 `Polarization
 默认输出目录：
 
 - `output/`
+
+## 示例文件
+
+`samples/` 目录下包含用于验收和回归测试的 Excel 文件：
+
+- `ota_v1_sample.xlsx`：V1 基础样例。
+- `ota_v2_sample.xlsx`：V2 基础样例。
+- `ota_v1_default_frequency_sample.xlsx`：V1 偏移位置样例，界面不填频率时默认输出 `1e9 Hz`。
+- `ota_mixed_multisheet_sample.xlsx`：V1/V2 混合多 sheet 样例，表格内容放在不同起始位置。
 
 ## 安装
 
