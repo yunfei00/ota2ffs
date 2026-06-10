@@ -5,7 +5,7 @@ from pathlib import Path
 from .utils import FarFieldSource, build_cst_header, db_to_linear, format_linear, format_number, output_path_for
 
 
-HEADER = "Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)"
+HEADER = "// Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)"
 
 
 def build_ffs_lines(source: FarFieldSource, mode: str, frequency_hz: float) -> list[str]:

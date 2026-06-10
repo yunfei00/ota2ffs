@@ -16,6 +16,14 @@ def _add_v2_table(ws, start_row, polarization, value):
     ws.cell(row=start_row + 2, column=3, value=value)
 
 
+def _add_v2_sheet(workbook, title, base_value):
+    ws = workbook.create_sheet(title)
+    _add_v2_table(ws, 1, "Theta", base_value)
+    _add_v2_table(ws, 6, "Phi", base_value + 1)
+    _add_v2_table(ws, 11, "Total", base_value + 2)
+    return ws
+
+
 def test_converter_keeps_going_when_one_sheet_fails(tmp_path):
     workbook = Workbook()
     ws = workbook.active
@@ -60,9 +68,49 @@ def test_converter_keeps_going_when_one_sheet_fails(tmp_path):
     assert tx_lines[9] == "1"
     assert rx_lines[24] == "1800000000"
     assert tx_lines[24] == "1800000000"
+    assert rx_lines[26] == "// Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)"
+    assert tx_lines[26] == "// Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)"
 
     rx_line = rx_lines[27]
     tx_line = tx_lines[27]
 
     assert float(rx_line.split(",")[2]) == pytest.approx(10)
     assert float(tx_line.split(",")[2]) == pytest.approx(0.1)
+
+
+def test_converter_processes_multiple_selected_sheets(tmp_path):
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    _add_v2_sheet(workbook, "SheetA", 20)
+    _add_v2_sheet(workbook, "SheetB", 40)
+    invalid = workbook.create_sheet("Broken")
+    invalid["A1"] = "not a known format"
+
+    excel_path = tmp_path / "multi.xlsx"
+    workbook.save(excel_path)
+
+    output_dir = tmp_path / "out"
+    result = convert_excel(
+        excel_path,
+        output_dir,
+        ["SheetA", "SheetB", "Broken"],
+        log_dir=tmp_path / "log",
+    )
+
+    excel_output_dir = output_dir / "multi"
+    assert result.generated_count == 8
+    assert result.failures == {"Broken": "无法识别为 V1 或 V2 格式"}
+
+    expected_files = {
+        "SheetA_Rx.ffs",
+        "SheetA_Tx.ffs",
+        "SheetA_total_Rx.ffs",
+        "SheetA_total_Tx.ffs",
+        "SheetB_Rx.ffs",
+        "SheetB_Tx.ffs",
+        "SheetB_total_Rx.ffs",
+        "SheetB_total_Tx.ffs",
+    }
+    assert {path.name for path in result.generated_files} == expected_files
+    for filename in expected_files:
+        assert (excel_output_dir / filename).exists()
