@@ -13,6 +13,7 @@ htmlcov/
 
 build/
 dist/
+*.spec
 *.egg-info/
 
 .idea/

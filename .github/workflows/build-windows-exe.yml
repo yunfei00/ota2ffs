@@ -38,6 +38,7 @@ jobs:
           python -m PyInstaller
           --noconfirm
           --clean
+          --onefile
           --windowed
           --name OTA2FFS
           main.py
@@ -59,7 +60,13 @@ jobs:
           $sampleDir = Join-Path $packageDir "samples"
 
           New-Item -ItemType Directory -Force -Path $releaseDir, $packageDir, $sampleDir | Out-Null
-          Copy-Item -LiteralPath "dist\OTA2FFS.exe" -Destination (Join-Path $packageDir "OTA2FFS.exe")
+          $exePath = Join-Path $PWD "dist\OTA2FFS.exe"
+          if (-not (Test-Path -LiteralPath $exePath)) {
+            Get-ChildItem -Path "dist" -Recurse | Format-Table FullName, Length
+            throw "Expected executable was not found: $exePath"
+          }
+
+          Copy-Item -LiteralPath $exePath -Destination (Join-Path $packageDir "OTA2FFS.exe")
           Copy-Item -LiteralPath "README.md" -Destination (Join-Path $packageDir "README.md")
           Copy-Item -Path "samples\*.xlsx" -Destination $sampleDir
 
