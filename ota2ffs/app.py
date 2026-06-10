@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from .converter import convert_excel
+from .radar_report import generate_radar_report
 from .utils import FREQUENCY_UNITS, get_default_output_dir
 
 
@@ -87,13 +88,19 @@ class MainWindow(QMainWindow):
 
         self.convert_button = QPushButton("开始转换")
         self.convert_button.clicked.connect(self.start_conversion)
+        self.radar_button = QPushButton("生成雷达图报表")
+        self.radar_button.clicked.connect(self.start_radar_report)
+
+        action_row = QHBoxLayout()
+        action_row.addWidget(self.convert_button)
+        action_row.addWidget(self.radar_button)
 
         root.addLayout(file_row)
         root.addLayout(output_row)
         root.addLayout(frequency_row)
         root.addLayout(sheet_buttons)
         root.addWidget(self.sheet_list, 2)
-        root.addWidget(self.convert_button)
+        root.addLayout(action_row)
         root.addWidget(QLabel("转换日志"))
         root.addWidget(self.log_output, 3)
 
@@ -171,6 +178,7 @@ class MainWindow(QMainWindow):
             return
 
         self.convert_button.setEnabled(False)
+        self.radar_button.setEnabled(False)
         self.append_log("开始转换...")
         try:
             result = convert_excel(
@@ -187,6 +195,34 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "转换完成", f"转换完成，生成 {result.generated_count} 个文件。")
         finally:
             self.convert_button.setEnabled(True)
+            self.radar_button.setEnabled(True)
+
+    def start_radar_report(self) -> None:
+        if self.excel_path is None:
+            QMessageBox.warning(self, "缺少 Excel 文件", "请先选择 Excel 文件。")
+            return
+        if self.output_dir is None:
+            QMessageBox.warning(self, "缺少输出目录", "请先选择输出目录。")
+            return
+
+        sheets = self.selected_sheets()
+        if not sheets:
+            QMessageBox.warning(self, "缺少 Sheet", "请至少选择一个 sheet。")
+            return
+
+        self.convert_button.setEnabled(False)
+        self.radar_button.setEnabled(False)
+        self.append_log("开始生成雷达图报表...")
+        try:
+            result = generate_radar_report(self.excel_path, self.output_dir, sheets)
+            self.append_log(f"解析到矩阵数量: {result.matrix_count}")
+            self.append_log(f"生成单图数量: {result.single_chart_count}")
+            self.append_log(f"生成对比图数量: {result.compare_chart_count}")
+            self.append_log(f"雷达图报表: {result.output_path}")
+            QMessageBox.information(self, "报表生成完成", f"雷达图报表已生成:\n{result.output_path}")
+        finally:
+            self.convert_button.setEnabled(True)
+            self.radar_button.setEnabled(True)
 
     def append_log(self, message: str) -> None:
         self.log_output.append(message)

@@ -13,6 +13,9 @@ OTA2FFS Converter 是一个 Python 桌面工具，用于将 OTA 暗室测试 Exc
 - 输出目录默认使用工具路径下的 `output/`，也可以手动选择。
 - 支持打开输出目录。
 - 转换日志默认生成到工具路径下的 `log/`。
+- 生成雷达图报表 Excel，直接读取原始 V1/V2 数据块，不依赖 `.ffs` 文件。
+
+重要说明：本工具不会修改原始 Excel，所有转换、分析和图表结果都会生成到新的输出文件中。
 
 ## FFS 输出格式
 
@@ -109,6 +112,64 @@ V2 sheet 中包含三个表格，每个表格左上角单元格为 `Polarization
 - `Total` 表格单独生成拓图 FFS，数据写入 `Re(E_Theta)`，`Re(E_Phi)` 全部为 `0`。
 - V2 输出文件头部频率使用表格自带频率，不使用界面输入的频率。
 - V2 三个表格可以放在 sheet 内不同起始行列，只要每个表格内部相对结构保持一致即可。
+
+## 第二阶段：雷达图报表
+
+Radar Report Generator 会直接读取原始 Excel 中的 V1/V2 数据块，解析为统一矩阵对象后，新建一个报表 Excel：
+
+```text
+原始Excel文件名_Radar_Report.xlsx
+```
+
+程序流程为：
+
+```text
+读取原始 Excel（只读）
+     ↓
+解析为标准矩阵对象 PatternMatrix
+     ↓
+创建新的 Workbook
+     ↓
+写入标准化数据、雷达图和处理日志
+     ↓
+保存为新的 report xlsx 文件
+```
+
+原始 Excel 使用 `read_only=True` 打开，报表使用 `Workbook()` 新建；程序不会在原始 workbook 上新增 sheet、修改单元格、插入图表或保存。
+
+报表至少包含：
+
+- `Radar_Report`：雷达图展示区。
+- `Normalized_Data`：图表引用的数据表。
+- `Process_Log`：处理日志。
+
+雷达图规则：
+
+- 所有原始数值在绘图前乘以 `-1`，例如 `-20` 绘制为 `20`。
+- 空值、缺失值、非数字值按 `0` 处理。
+- 不进行平均聚合。
+- 每个矩阵的每一行生成一个 Row 雷达图。
+- 每个矩阵的每一列生成一个 Col 雷达图。
+
+Row 雷达图含义：
+
+- 雷达轴为 `col_angles`，通常是 Theta 角度。
+- 数据为当前行所有列的正值。
+- 标题格式为 `{sheet_name}_{block_name}_Row_{row_angle}`。
+
+Col 雷达图含义：
+
+- 雷达轴为 `row_angles`，通常是 Phi 角度。
+- 数据为当前列所有行的正值。
+- 标题格式为 `{sheet_name}_{block_name}_Col_{col_angle}`。
+
+多 sheet 对比图：
+
+- 当用户勾选多个 sheet 时，会额外生成 `Compare Charts` 区域。
+- 只比较相同 `block_name` 的数据。
+- Row 对比图按相同 `row_angle` 合并，不同 sheet 作为不同系列。
+- Col 对比图按相同 `col_angle` 合并，不同 sheet 作为不同系列。
+- 某个 sheet 缺少角度时，该系列对应值补 `0`。
 
 ## 输出文件命名
 
