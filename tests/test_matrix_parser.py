@@ -40,8 +40,21 @@ def test_v1_sheet_parses_theta_and_phi_matrices():
 
     assert [matrix.block_name for matrix in matrices] == ["Theta", "Phi"]
     assert matrices[0].sheet_name == "V1"
-    assert matrices[0].row_angles == [-180, 0]
+    assert matrices[0].row_angles == [0, 180]
     assert matrices[0].col_angles == [0, 90]
+
+
+def test_v1_sheet_offsets_raw_phi_angles_for_radar_compare():
+    workbook = Workbook()
+    ws = workbook.active
+    ws.title = "V1"
+    _add_v1_block(ws, 3, 4, "Theta", -10)
+    _add_v1_block(ws, 20, 7, "Phi", -20)
+
+    matrices = parse_v1_sheet(ws)
+
+    assert matrices[0].row_angles == [0, 180]
+    assert matrices[1].row_angles == [0, 180]
 
 
 def test_v2_sheet_parses_theta_phi_total_matrices():

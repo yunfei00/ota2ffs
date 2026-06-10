@@ -83,6 +83,7 @@ def _parse_v1_block(ws: Worksheet, start: BlockStart, block_name: str) -> Patter
     first_value_column = start_column + 2
     col_angles, value_columns = _read_col_angles(ws, start_row, first_value_column)
     row_angles, values = _read_matrix_rows(ws, start_row + 2, row_angle_column, value_columns)
+    row_angles = [_v1_output_phi_angle(angle) for angle in row_angles]
     return PatternMatrix(
         sheet_name=ws.title,
         block_name=block_name,
@@ -152,6 +153,10 @@ def _read_matrix_rows(
 def _numeric_or_zero(value) -> float:
     number = to_float(value)
     return float(number) if number is not None else 0.0
+
+
+def _v1_output_phi_angle(angle: float) -> float:
+    return normalize_angle(angle + 180)
 
 
 def _has_matrix_data(matrix: PatternMatrix) -> bool:
