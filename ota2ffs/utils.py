@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import math
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
 
 FieldMap = dict[tuple[float, float], float]
+FREQUENCY_UNITS = ("MHz", "GHz", "KHz", "Hz")
+FREQUENCY_UNIT_MULTIPLIERS = {
+    "Hz": 1.0,
+    "KHz": 1_000.0,
+    "MHz": 1_000_000.0,
+    "GHz": 1_000_000_000.0,
+}
 
 
 @dataclass(slots=True)
@@ -113,7 +121,8 @@ def sanitize_filename(name: str) -> str:
 
 
 def output_path_for(source: FarFieldSource, output_dir: str | Path, mode: str) -> Path:
-    filename = f"{sanitize_filename(source.sheet_name)}{source.suffix}_{mode.upper()}.ffs"
+    mode_suffix = "Tx" if mode.upper() == "TX" else "Rx"
+    filename = f"{sanitize_filename(source.sheet_name)}{source.suffix}_{mode_suffix}.ffs"
     return Path(output_dir) / filename
 
 
@@ -135,3 +144,70 @@ def format_linear(value: float) -> str:
     if math.isclose(value, 0.0, abs_tol=1e-15):
         return "0"
     return f"{value:.12g}"
+
+
+def get_tool_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+def get_default_output_dir() -> Path:
+    return get_tool_base_dir() / "output"
+
+
+def get_default_log_dir() -> Path:
+    return get_tool_base_dir() / "log"
+
+
+def frequency_to_hz(value: str | float | int | None, unit: str) -> float | None:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+    if unit not in FREQUENCY_UNIT_MULTIPLIERS:
+        raise ValueError(f"不支持的频率单位: {unit}")
+
+    number = extract_number(text)
+    if number is None:
+        raise ValueError("频率必须是数字")
+    return number * FREQUENCY_UNIT_MULTIPLIERS[unit]
+
+
+def format_frequency_hz(value: float) -> str:
+    if math.isclose(value, round(value), rel_tol=0, abs_tol=1e-6):
+        return str(int(round(value)))
+    return f"{value:.12g}"
+
+
+def build_cst_header(frequency_hz: float) -> list[str]:
+    return [
+        "// CST Farfield Source File",
+        "",
+        "// Version:",
+        "3.0",
+        "",
+        "// Data Type",
+        "Farfield",
+        "",
+        "// #Frequencies",
+        "1",
+        "",
+        "// Position",
+        "0 0 0          // 单位 m",
+        "",
+        "// z-Axis",
+        "0 0 1",
+        "",
+        "// x-Axis",
+        "1 0 0",
+        "",
+        "// 对每个频点，各 4 行",
+        "-1",
+        "-1",
+        "-1",
+        format_frequency_hz(frequency_hz),
+        "",
+    ]

@@ -1,0 +1,31 @@
+// CST Farfield Source File
+
+// Version:
+2.1
+
+// Data Type
+Multipoles
+
+//Position
+0.0 0.0 0.0
+
+//z-Axis
+0.0 0.0 1.0
+
+//x-Axis
+1.0 0.0 0.0
+
+// Radiated Power/Accepted Power/Stimulated Power [W,rms],   Frequency [Hz]
+-1
+-1
+-1
+30e9
+
+// >> Total #multipoles
+2
+
+// >> n, m, Re(a), Im(a), Re(b), Im(b):
+1  -1    1.0  0.0  0.0  0.0
+1  +1    1.0  0.0  0.0  0.0
+
+ 

@@ -46,7 +46,7 @@ def parse_sheet(ws: Worksheet) -> list[FarFieldSource]:
         sources.append(
             FarFieldSource(
                 sheet_name=ws.title,
-                suffix="_拓图",
+                suffix="_total",
                 theta_angles=total_table.theta_angles,
                 phi_angles=total_table.phi_angles,
                 e_theta_db=total_table.values,
@@ -109,7 +109,7 @@ def _parse_table(ws: Worksheet, start_row: int, start_column: int, polarization:
         theta_angles=theta_angles,
         phi_angles=phi_angles,
         values=values,
-        frequency_mhz=_read_frequency(ws, start_row, start_column),
+        frequency_mhz=_read_frequency(ws, start_row, theta_columns[-1][0]),
     )
 
 
@@ -125,10 +125,5 @@ def _read_theta_columns(ws: Worksheet, row: int, first_column: int) -> list[tupl
     return theta_columns
 
 
-def _read_frequency(ws: Worksheet, row: int, first_column: int) -> float | None:
-    last_value = None
-    for column in range(first_column, ws.max_column + 1):
-        value = ws.cell(row=row, column=column).value
-        if cell_text(value):
-            last_value = value
-    return extract_number(last_value)
+def _read_frequency(ws: Worksheet, row: int, frequency_column: int) -> float | None:
+    return extract_number(ws.cell(row=row, column=frequency_column).value)

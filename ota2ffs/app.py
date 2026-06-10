@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from openpyxl import load_workbook
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -21,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from .converter import convert_excel
+from .utils import FREQUENCY_UNITS, get_default_output_dir
 
 
 class MainWindow(QMainWindow):
@@ -29,7 +32,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("OTA2FFS Converter")
         self.resize(860, 620)
         self.excel_path: Path | None = None
-        self.output_dir: Path | None = None
+        self.output_dir: Path | None = get_default_output_dir()
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -48,11 +51,25 @@ class MainWindow(QMainWindow):
         output_row = QHBoxLayout()
         self.output_edit = QLineEdit()
         self.output_edit.setReadOnly(True)
+        self.output_edit.setText(str(self.output_dir))
         choose_output_button = QPushButton("选择输出目录")
         choose_output_button.clicked.connect(self.choose_output_dir)
+        open_output_button = QPushButton("打开输出目录")
+        open_output_button.clicked.connect(self.open_output_dir)
         output_row.addWidget(QLabel("输出目录"))
         output_row.addWidget(self.output_edit, 1)
         output_row.addWidget(choose_output_button)
+        output_row.addWidget(open_output_button)
+
+        frequency_row = QHBoxLayout()
+        self.frequency_edit = QLineEdit()
+        self.frequency_edit.setPlaceholderText("V1 可填写；V2 自动读取表格频率")
+        self.frequency_unit_combo = QComboBox()
+        self.frequency_unit_combo.addItems(FREQUENCY_UNITS)
+        self.frequency_unit_combo.setCurrentText("MHz")
+        frequency_row.addWidget(QLabel("频率"))
+        frequency_row.addWidget(self.frequency_edit, 1)
+        frequency_row.addWidget(self.frequency_unit_combo)
 
         sheet_buttons = QHBoxLayout()
         select_all_button = QPushButton("全选")
@@ -73,6 +90,7 @@ class MainWindow(QMainWindow):
 
         root.addLayout(file_row)
         root.addLayout(output_row)
+        root.addLayout(frequency_row)
         root.addLayout(sheet_buttons)
         root.addWidget(self.sheet_list, 2)
         root.addWidget(self.convert_button)
@@ -100,6 +118,14 @@ class MainWindow(QMainWindow):
             return
         self.output_dir = Path(path)
         self.output_edit.setText(str(self.output_dir))
+
+    def open_output_dir(self) -> None:
+        if self.output_dir is None:
+            return
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.output_dir)))
+        if not opened:
+            QMessageBox.warning(self, "打开失败", "无法打开输出目录。")
 
     def load_sheet_names(self) -> None:
         self.sheet_list.clear()
@@ -147,7 +173,13 @@ class MainWindow(QMainWindow):
         self.convert_button.setEnabled(False)
         self.append_log("开始转换...")
         try:
-            result = convert_excel(self.excel_path, self.output_dir, sheets)
+            result = convert_excel(
+                self.excel_path,
+                self.output_dir,
+                sheets,
+                frequency_value=self.frequency_edit.text().strip(),
+                frequency_unit=self.frequency_unit_combo.currentText(),
+            )
             for line in result.log_lines:
                 self.append_log(line)
             if result.log_path is not None:

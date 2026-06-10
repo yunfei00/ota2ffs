@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .utils import FarFieldSource, db_to_linear, format_linear, format_number, output_path_for
+from .utils import FarFieldSource, build_cst_header, db_to_linear, format_linear, format_number, output_path_for
 
 
 HEADER = "Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)"
 
 
-def build_ffs_lines(source: FarFieldSource, mode: str) -> list[str]:
-    lines = [HEADER]
+def build_ffs_lines(source: FarFieldSource, mode: str, frequency_hz: float) -> list[str]:
+    lines = build_cst_header(frequency_hz)
+    lines.append(HEADER)
     for phi in source.phi_angles:
         for theta in source.theta_angles:
             key = (phi, theta)
@@ -30,8 +31,13 @@ def build_ffs_lines(source: FarFieldSource, mode: str) -> list[str]:
     return lines
 
 
-def write_ffs(source: FarFieldSource, output_dir: str | Path, mode: str) -> Path:
+def write_ffs(
+    source: FarFieldSource,
+    output_dir: str | Path,
+    mode: str,
+    frequency_hz: float,
+) -> Path:
     path = output_path_for(source, output_dir, mode)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(build_ffs_lines(source, mode)) + "\n", encoding="utf-8")
+    path.write_text("\n".join(build_ffs_lines(source, mode, frequency_hz)) + "\n", encoding="utf-8")
     return path

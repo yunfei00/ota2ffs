@@ -6,7 +6,7 @@ from ota2ffs import parser_v2
 def _add_table(ws, start_row, polarization, offset):
     ws.cell(row=start_row, column=1, value="Polarization")
     ws.cell(row=start_row, column=2, value=polarization)
-    ws.cell(row=start_row, column=6, value="900 MHz")
+    ws.cell(row=start_row, column=4, value=900)
     ws.cell(row=start_row + 1, column=1, value="Phi\\Theta")
     for column, theta in enumerate([0, 90, 180], start=2):
         ws.cell(row=start_row + 1, column=column, value=theta)
@@ -41,6 +41,6 @@ def test_v2_parser_builds_regular_and_total_sources():
     assert regular.phi_angles == [0, 180]
     assert regular.e_theta_db[(0, 0)] == 14
     assert regular.e_phi_db[(0, 0)] == 24
-    assert total.suffix == "_拓图"
+    assert total.suffix == "_total"
     assert total.e_theta_db[(0, 0)] == 34
     assert total.e_phi_db == {}
