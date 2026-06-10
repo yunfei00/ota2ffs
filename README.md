@@ -146,3 +146,23 @@ python main.py
 ```bash
 pytest
 ```
+
+## GitHub Actions 打包
+
+仓库包含 Windows exe 自动构建流程：
+
+- 每次 push 会运行测试并构建 `OTA2FFS.exe`。
+- 构建结果会打包为 zip 并上传到 GitHub Actions artifact。
+- zip 内包含：
+  - `OTA2FFS.exe`
+  - `README.md`
+  - `使用说明.txt`
+  - `samples/` 下的 Excel 示例文件
+- push tag 时会自动创建 GitHub Release，并上传同一个 zip 包。
+
+发布示例：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```

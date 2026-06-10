@@ -1,0 +1,97 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "**"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-exe:
+    name: Build Windows EXE
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Build executable
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --windowed
+          --name OTA2FFS
+          main.py
+
+      - name: Prepare package
+        id: package
+        shell: pwsh
+        run: |
+          $refName = "${{ github.ref_name }}" -replace '[^A-Za-z0-9._-]', '-'
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          if ("${{ github.ref }}".StartsWith("refs/tags/")) {
+            $packageName = "ota2ffs-windows-$refName"
+          } else {
+            $packageName = "ota2ffs-windows-$refName-$shortSha"
+          }
+
+          $releaseDir = Join-Path $PWD "release"
+          $packageDir = Join-Path $releaseDir $packageName
+          $sampleDir = Join-Path $packageDir "samples"
+
+          New-Item -ItemType Directory -Force -Path $releaseDir, $packageDir, $sampleDir | Out-Null
+          Copy-Item -LiteralPath "dist\OTA2FFS.exe" -Destination (Join-Path $packageDir "OTA2FFS.exe")
+          Copy-Item -LiteralPath "README.md" -Destination (Join-Path $packageDir "README.md")
+          Copy-Item -Path "samples\*.xlsx" -Destination $sampleDir
+
+          @"
+          OTA2FFS Converter 使用说明
+
+          1. 双击 OTA2FFS.exe 启动工具。
+          2. 选择 OTA 测试 Excel 文件。
+          3. 选择需要转换的 sheet。
+          4. V1 数据请在界面填写频率和单位；V2 数据会自动读取表格自身频率。
+          5. 点击“开始转换”，输出文件默认生成到工具目录下的 output 文件夹。
+          6. 转换日志默认生成到工具目录下的 log 文件夹。
+
+          samples 文件夹内提供 Excel 示例文件，可用于快速验收。
+          "@ | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $packageDir "使用说明.txt")
+
+          $zipPath = Join-Path $releaseDir "$packageName.zip"
+          Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $zipPath -Force
+
+          "package_name=$packageName" >> $env:GITHUB_OUTPUT
+          "zip_path=$zipPath" >> $env:GITHUB_OUTPUT
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.package_name }}
+          path: ${{ steps.package.outputs.zip_path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.zip_path }}
+          generate_release_notes: true
