@@ -83,11 +83,12 @@ jobs:
           samples 文件夹内提供 Excel 示例文件，可用于快速验收。
           "@ | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $packageDir "使用说明.txt")
 
-          $zipPath = Join-Path $releaseDir "$packageName.zip"
+          $zipRelPath = Join-Path "release" "$packageName.zip"
+          $zipPath = Join-Path $PWD $zipRelPath
           Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $zipPath -Force
 
           "package_name=$packageName" >> $env:GITHUB_OUTPUT
-          "zip_path=$zipPath" >> $env:GITHUB_OUTPUT
+          "zip_path=$zipRelPath" >> $env:GITHUB_OUTPUT
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
