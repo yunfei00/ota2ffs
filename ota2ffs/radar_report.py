@@ -6,6 +6,7 @@ from typing import Iterable
 
 from openpyxl import Workbook
 from openpyxl.chart import RadarChart, Reference
+from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.series import SeriesLabel
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -513,6 +514,16 @@ def _new_radar_chart(title: str) -> RadarChart:
     chart.title = title
     chart.width = CHART_WIDTH
     chart.height = CHART_HEIGHT
+    chart.legend = None
+    chart.x_axis.delete = False
+    chart.x_axis.tickLblPos = "nextTo"
+    chart.dataLabels = DataLabelList(
+        showLegendKey=False,
+        showVal=False,
+        showCatName=True,
+        showSerName=False,
+    )
+    chart.dataLabels.dLblPos = "bestFit"
     return chart
 
 
