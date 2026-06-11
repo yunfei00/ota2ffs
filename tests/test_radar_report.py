@@ -86,7 +86,7 @@ def test_col_chart_count_equals_col_angle_count():
     assert len(report_ws._charts) == 3
 
 
-def test_radar_charts_hide_legend_and_show_angle_labels(tmp_path):
+def test_radar_charts_use_excel_native_defaults(tmp_path):
     workbook = Workbook()
     report_ws = workbook.active
     data_ws = workbook.create_sheet("Data")
@@ -95,19 +95,21 @@ def test_radar_charts_hide_legend_and_show_angle_labels(tmp_path):
     add_row_charts(report_ws, data_ws, _matrix(), 1, 1, {"row": 1}, counts)
 
     chart = report_ws._charts[0]
-    assert chart.legend is None
-    assert chart.x_axis.tickLblPos == "nextTo"
-    assert chart.dataLabels.showCatName is True
-    assert chart.dataLabels.showLegendKey is False
+    assert chart.style == 26
+    assert chart.legend is not None
+    assert chart.legend.legendPos == "r"
+    assert chart.dataLabels is None
 
-    output_path = tmp_path / "chart_labels.xlsx"
+    output_path = tmp_path / "chart_native.xlsx"
     workbook.save(output_path)
     with zipfile.ZipFile(output_path) as archive:
         chart_xml = archive.read("xl/charts/chart1.xml").decode("utf-8")
 
-    assert "<legend>" not in chart_xml
-    assert '<showCatName val="1"' in chart_xml
-    assert '<showLegendKey val="0"' in chart_xml
+    assert '<style val="26"' in chart_xml
+    assert '<radarStyle val="standard"' in chart_xml
+    assert "<legend>" in chart_xml
+    assert "<dLbls>" not in chart_xml
+    assert "<tickLblPos" not in chart_xml
 
 
 def test_multiple_sheets_generate_compare_charts_and_output_xlsx(tmp_path):

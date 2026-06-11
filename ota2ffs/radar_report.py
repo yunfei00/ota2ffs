@@ -6,7 +6,6 @@ from typing import Iterable
 
 from openpyxl import Workbook
 from openpyxl.chart import RadarChart, Reference
-from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.series import SeriesLabel
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -18,6 +17,7 @@ from .matrix_parser import parse_matrices_from_workbook
 
 CHART_WIDTH = 12
 CHART_HEIGHT = 8
+EXCEL_NATIVE_RADAR_STYLE = 26
 CHART_COLUMN_STEP = 8
 CHART_ROW_STEP = 16
 MATRIX_AREA_HEIGHT = 36
@@ -511,19 +511,10 @@ def _create_chart_from_series_table(data_ws: Worksheet, title: str, table: DataT
 def _new_radar_chart(title: str) -> RadarChart:
     chart = RadarChart()
     chart.type = "standard"
+    chart.style = EXCEL_NATIVE_RADAR_STYLE
     chart.title = title
     chart.width = CHART_WIDTH
     chart.height = CHART_HEIGHT
-    chart.legend = None
-    chart.x_axis.delete = False
-    chart.x_axis.tickLblPos = "nextTo"
-    chart.dataLabels = DataLabelList(
-        showLegendKey=False,
-        showVal=False,
-        showCatName=True,
-        showSerName=False,
-    )
-    chart.dataLabels.dLblPos = "bestFit"
     return chart
 
 
