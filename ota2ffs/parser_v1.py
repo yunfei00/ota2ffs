@@ -7,6 +7,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from .utils import (
     FarFieldSource,
     complete_angle_range,
+    contains_text,
     infer_step,
     is_text,
     normalize_angle,
@@ -20,6 +21,29 @@ BlockStart: TypeAlias = tuple[int, int]
 
 def is_v1_sheet(ws: Worksheet) -> bool:
     return _find_block(ws, "Theta") is not None and _find_block(ws, "Phi") is not None
+
+
+def parse_sources(ws: Worksheet) -> list[FarFieldSource]:
+    sources = [parse_sheet(ws)]
+    total_start = _find_block(ws, "Total")
+    if total_start is not None:
+        total_headers, total_phi_values, total_raw = _parse_block(ws, total_start)
+        total_values = {
+            (normalize_angle(raw_phi + 180), normalize_angle(theta)): value
+            for (raw_phi, theta), value in total_raw.items()
+        }
+        sources.append(
+            FarFieldSource(
+                sheet_name=ws.title,
+                suffix="_total",
+                theta_angles=_complete_theta_angles(total_headers),
+                phi_angles=_complete_phi_angles(total_phi_values),
+                e_theta_db=total_values,
+                e_phi_db={},
+                version="V1",
+            )
+        )
+    return sources
 
 
 def parse_sheet(ws: Worksheet) -> FarFieldSource:
@@ -58,8 +82,8 @@ def _find_block(ws: Worksheet, title: str) -> BlockStart | None:
         for column in range(1, ws.max_column + 1):
             if (
                 is_text(ws.cell(row=row, column=column).value, title)
-                and is_text(ws.cell(row=row, column=column + 1).value, "Phi Angle")
-                and is_text(ws.cell(row=row + 1, column=column + 1).value, "Theta Angle")
+                and contains_text(ws.cell(row=row, column=column + 1).value, "Phi Angle")
+                and contains_text(ws.cell(row=row + 1, column=column + 1).value, "Theta Angle")
             ):
                 return row, column
     return None

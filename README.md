@@ -83,14 +83,15 @@ linear = 10 ** ((-db) / 20)
 
 ## V1 Excel 格式
 
-V1 sheet 包含两个数据块：
+V1 sheet 至少包含 `Theta`、`Phi` 两个数据块，也可以额外包含 `Total` 数据块：
 
-- 第一块：`A1 = Theta`，`B1 = Phi Angle`，`B2 = Theta Angle`。
+- 第一块：`A1 = Theta`，`B1` 内容包含 `Phi Angle`，`B2` 内容包含 `Theta Angle`（允许额外符号或单位）。
 - `C1` 开始为 Theta 角度。
 - `B3` 开始为 Phi 原始角度。
 - 第一块交叉区域写入 `Re(E_Theta)`，也就是 FFS 第 3 列。
-- 第二块：结构相同，典型位置为 `A30 = Phi`，`B30 = Phi Angle`，`B31 = Theta Angle`。
+- 第二块：结构相同，典型位置为 `A30 = Phi`，`B30` 内容包含 `Phi Angle`，`B31` 内容包含 `Theta Angle`。
 - 第二块交叉区域写入 `Re(E_Phi)`，也就是 FFS 第 5 列。
+- 可选 `Total` 块结构相同，会单独生成 `_total` 后缀 FFS，数据写入 `Re(E_Theta)`（第 3 列），`Re(E_Phi)` 全部为 `0`。
 - Phi 输出角度为 Excel 中 Phi 原始角度加 `180`。
 - Phi 输出范围补齐为 `0~360`。
 - Theta 输出范围补齐为 `0~180`。
@@ -102,7 +103,7 @@ V1 sheet 包含两个数据块：
 V2 sheet 中包含三个表格，每个表格左上角单元格为 `Polarization`：
 
 - `Polarization` 后一个单元格分别为 `Theta`、`Phi`、`Total`。
-- 频率位于当前表格 `Polarization` 行中、最后一个 Theta 角度列的上方，例如 `180` 上方的 `2450`。
+- 频率在当前表格 `Polarization` 行内读取：优先使用 `Freq` 单元格后一个单元格中的数字；如果没有该数字，则使用同一行最后一个有效数字。
 - 频率数值不带单位。
 - V2 频率单位固定按 `MHz` 处理。
 - 下一行格式为 `Phi\Theta, 0, 30, 60, ..., 180`。
@@ -193,7 +194,7 @@ Col 雷达图含义：
 - V1 或 V2 普通文件：
   - `output/Input/Sheet1_Rx.ffs`
   - `output/Input/Sheet1_Tx.ffs`
-- V2 Total 文件：
+- V1/V2 Total 文件：
   - `output/Input/Sheet1_total_Rx.ffs`
   - `output/Input/Sheet1_total_Tx.ffs`
 - 转换日志：

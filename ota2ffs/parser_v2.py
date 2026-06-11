@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .utils import FarFieldSource, cell_text, extract_number, is_text, normalize_angle, sorted_unique, to_float
+from .utils import FarFieldSource, cell_text, contains_text, extract_number, is_text, normalize_angle, sorted_unique, to_float
 
 
 @dataclass(slots=True)
@@ -68,7 +68,10 @@ def _find_tables(ws: Worksheet) -> list[_V2Table]:
             polarization = cell_text(ws.cell(row=row, column=column + 1).value).casefold()
             if polarization not in {"theta", "phi", "total"}:
                 continue
-            tables.append(_parse_table(ws, row, column, polarization))
+            try:
+                tables.append(_parse_table(ws, row, column, polarization))
+            except ValueError:
+                continue
     return tables
 
 
@@ -109,7 +112,7 @@ def _parse_table(ws: Worksheet, start_row: int, start_column: int, polarization:
         theta_angles=theta_angles,
         phi_angles=phi_angles,
         values=values,
-        frequency_mhz=_read_frequency(ws, start_row, theta_columns[-1][0]),
+        frequency_mhz=_read_frequency(ws, start_row, start_column),
     )
 
 
@@ -125,5 +128,15 @@ def _read_theta_columns(ws: Worksheet, row: int, first_column: int) -> list[tupl
     return theta_columns
 
 
-def _read_frequency(ws: Worksheet, row: int, frequency_column: int) -> float | None:
-    return extract_number(ws.cell(row=row, column=frequency_column).value)
+def _read_frequency(ws: Worksheet, row: int, start_column: int) -> float | None:
+    for column in range(start_column, ws.max_column + 1):
+        if contains_text(ws.cell(row=row, column=column).value, "Freq"):
+            frequency = extract_number(ws.cell(row=row, column=column + 1).value)
+            if frequency is not None:
+                return frequency
+
+    for column in range(ws.max_column, start_column - 1, -1):
+        frequency = extract_number(ws.cell(row=row, column=column).value)
+        if frequency is not None:
+            return frequency
+    return None

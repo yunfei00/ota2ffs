@@ -44,3 +44,32 @@ def test_v2_parser_builds_regular_and_total_sources():
     assert total.suffix == "_total"
     assert total.e_theta_db[(0, 0)] == 34
     assert total.e_phi_db == {}
+
+
+def test_v2_frequency_prefers_cell_after_freq_label_when_not_last_numeric():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "V2Freq"
+    _add_table(ws, 1, "Theta", 10)
+    _add_table(ws, 8, "Phi", 20)
+    ws.cell(row=1, column=3, value="Freq")
+    ws.cell(row=1, column=4, value=2450)
+    ws.cell(row=1, column=9, value=9999)
+
+    sources = parser_v2.parse_sheet(ws)
+
+    assert sources[0].frequency_mhz == 2450
+
+
+def test_v2_frequency_falls_back_to_last_numeric_cell_when_freq_label_missing():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "V2FreqFallback"
+    _add_table(ws, 1, "Theta", 10)
+    _add_table(ws, 8, "Phi", 20)
+    ws.cell(row=1, column=4, value=None)
+    ws.cell(row=1, column=6, value=1800)
+
+    sources = parser_v2.parse_sheet(ws)
+
+    assert sources[0].frequency_mhz == 1800
