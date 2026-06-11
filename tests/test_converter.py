@@ -201,3 +201,27 @@ def test_sample_v1_default_frequency_excel_converts(tmp_path):
     assert result.generated_count == 2
     output_file = tmp_path / "out" / "ota_v1_default_frequency_sample" / "V1_Default_1e9_Rx.ffs"
     assert output_file.read_text(encoding="utf-8").splitlines()[24] == "1000000000"
+
+
+def test_converter_falls_back_to_v1_when_polarization_marker_has_no_v2_data(tmp_path):
+    workbook = Workbook()
+    ws = workbook.active
+    ws.title = "FallbackV1"
+    ws["A1"] = "Polarization"
+    ws["B1"] = "Theta"
+    _add_v1_block(ws, 5, 3, "Theta", -10)
+    _add_v1_block(ws, 15, 3, "Phi", -20)
+    _add_v1_block(ws, 25, 3, "Total", -30)
+
+    excel_path = tmp_path / "fallback.xlsx"
+    workbook.save(excel_path)
+
+    result = convert_excel(excel_path, tmp_path / "out", log_dir=tmp_path / "log")
+
+    excel_output_dir = tmp_path / "out" / "fallback"
+    assert result.failures == {}
+    assert result.generated_count == 4
+    assert (excel_output_dir / "FallbackV1_Rx.ffs").exists()
+    assert (excel_output_dir / "FallbackV1_Tx.ffs").exists()
+    assert (excel_output_dir / "FallbackV1_total_Rx.ffs").exists()
+    assert (excel_output_dir / "FallbackV1_total_Tx.ffs").exists()

@@ -77,3 +77,20 @@ def test_v1_parser_supports_shifted_blocks():
     assert source.phi_angles == [0, 180, 360]
     assert source.e_theta_db[(0, 0)] == 14
     assert source.e_phi_db[(180, 90)] == 26
+
+
+def test_v1_parser_supports_total_block_and_loose_angle_labels():
+    ws = _build_v1_sheet()
+    ws["B1"] = "Phi Angle (deg)"
+    ws["B2"] = "Theta Angle °"
+    _add_v1_block(ws, 45, 4, "Total", -100)
+
+    assert parser_v1.is_v1_sheet(ws)
+    sources = parser_v1.parse_sources(ws)
+
+    assert len(sources) == 2
+    regular, total = sources
+    assert regular.e_theta_db[(180, 90)] == -8
+    assert total.suffix == "_total"
+    assert total.e_theta_db[(0, 0)] == -96
+    assert total.e_phi_db == {}

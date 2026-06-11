@@ -62,7 +62,7 @@ def convert_excel(
                 sources = parser_v2.parse_sheet(ws)
                 version = "V2"
             elif parser_v1.is_v1_sheet(ws):
-                sources = [parser_v1.parse_sheet(ws)]
+                sources = parser_v1.parse_sources(ws)
                 version = "V1"
             else:
                 raise ValueError("无法识别为 V1 或 V2 格式")

@@ -7,7 +7,7 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .matrix_model import PatternMatrix
-from .utils import cell_text, is_text, normalize_angle, to_float
+from .utils import cell_text, contains_text, is_text, normalize_angle, to_float
 
 
 BlockStart: TypeAlias = tuple[int, int]
@@ -36,14 +36,14 @@ def parse_matrices_from_workbook(
 
 def parse_v1_sheet(ws: Worksheet) -> list[PatternMatrix]:
     matrices: list[PatternMatrix] = []
-    for block_name in ("Theta", "Phi"):
+    for block_name in ("Theta", "Phi", "Total"):
         block_start = _find_v1_block(ws, block_name)
         if block_start is None:
             continue
         matrix = _parse_v1_block(ws, block_start, block_name)
         if _has_matrix_data(matrix):
             matrices.append(matrix)
-    if len({matrix.block_name for matrix in matrices}) < 2:
+    if len({matrix.block_name.casefold() for matrix in matrices} & {"theta", "phi"}) < 2:
         return []
     return matrices
 
@@ -70,8 +70,8 @@ def _find_v1_block(ws: Worksheet, block_name: str) -> BlockStart | None:
         for column in range(1, ws.max_column + 1):
             if (
                 is_text(ws.cell(row=row, column=column).value, block_name)
-                and is_text(ws.cell(row=row, column=column + 1).value, "Phi Angle")
-                and is_text(ws.cell(row=row + 1, column=column + 1).value, "Theta Angle")
+                and contains_text(ws.cell(row=row, column=column + 1).value, "Phi Angle")
+                and contains_text(ws.cell(row=row + 1, column=column + 1).value, "Theta Angle")
             ):
                 return row, column
     return None

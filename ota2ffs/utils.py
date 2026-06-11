@@ -49,6 +49,12 @@ def is_text(value: Any, expected: str) -> bool:
     return cell_text(value).casefold() == expected.casefold()
 
 
+def contains_text(value: Any, expected: str) -> bool:
+    actual = re.sub(r"[^0-9a-z]+", "", cell_text(value).casefold())
+    normalized_expected = re.sub(r"[^0-9a-z]+", "", expected.casefold())
+    return bool(normalized_expected and normalized_expected in actual)
+
+
 def extract_number(value: Any) -> float | None:
     if value is None:
         return None
