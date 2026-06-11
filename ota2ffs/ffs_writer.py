@@ -5,11 +5,14 @@ from pathlib import Path
 from .utils import FarFieldSource, build_cst_header, db_to_linear, format_linear, format_number, output_path_for
 
 
-HEADER = "// Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)"
+HEADER = "// >> Phi, Theta, Re(E_Theta), Im(E_Theta), Re(E_Phi), Im(E_Phi):"
 
 
 def build_ffs_lines(source: FarFieldSource, mode: str, frequency_hz: float) -> list[str]:
     lines = build_cst_header(frequency_hz)
+    lines.append("// >> Total #phi samples, total #theta samples")
+    lines.append(f"{len(source.phi_angles)}   {len(source.theta_angles)}")
+    lines.append("")
     lines.append(HEADER)
     for phi in source.phi_angles:
         for theta in source.theta_angles:
@@ -17,7 +20,7 @@ def build_ffs_lines(source: FarFieldSource, mode: str, frequency_hz: float) -> l
             e_theta = db_to_linear(source.e_theta_db.get(key), mode)
             e_phi = db_to_linear(source.e_phi_db.get(key), mode)
             lines.append(
-                ",".join(
+                " ".join(
                     [
                         format_number(phi),
                         format_number(theta),

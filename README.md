@@ -47,12 +47,16 @@ Farfield
 -1
 -1
 2450000000
+
+// >> Total #phi samples, total #theta samples
+7   4
 ```
 
-头部之后的数据主体为逗号分隔文本，列顺序固定为：
+频率下方会写入真实测试数据中的 Phi / Theta 采样数量。头部之后的数据主体为空格分隔文本，列顺序固定为：
 
 ```text
-// Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)
+// >> Phi, Theta, Re(E_Theta), Im(E_Theta), Re(E_Phi), Im(E_Phi):
+0 0 10 0 1.99526231497 0
 ```
 
 V2 sheet 会使用表格中自带的频率，单位固定为 `MHz`。V1 sheet 或没有自带频率的数据会使用界面中输入的频率；如果界面频率留空，则默认使用 `1e9 Hz`。

@@ -101,14 +101,20 @@ def test_converter_keeps_going_when_one_sheet_fails(tmp_path):
     assert tx_lines[9] == "1"
     assert rx_lines[24] == "1800000000"
     assert tx_lines[24] == "1800000000"
-    assert rx_lines[26] == "// Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)"
-    assert tx_lines[26] == "// Phi,Theta,Re(E_Theta),Im(E_Theta),Re(E_Phi),Im(E_Phi)"
+    assert rx_lines[26] == "// >> Total #phi samples, total #theta samples"
+    assert tx_lines[26] == "// >> Total #phi samples, total #theta samples"
+    assert rx_lines[27] == "1   2"
+    assert tx_lines[27] == "1   2"
+    assert rx_lines[29] == "// >> Phi, Theta, Re(E_Theta), Im(E_Theta), Re(E_Phi), Im(E_Phi):"
+    assert tx_lines[29] == "// >> Phi, Theta, Re(E_Theta), Im(E_Theta), Re(E_Phi), Im(E_Phi):"
 
-    rx_line = rx_lines[27]
-    tx_line = tx_lines[27]
+    rx_line = rx_lines[30]
+    tx_line = tx_lines[30]
 
-    assert float(rx_line.split(",")[2]) == pytest.approx(10)
-    assert float(tx_line.split(",")[2]) == pytest.approx(0.1)
+    assert "," not in rx_line
+    assert "," not in tx_line
+    assert float(rx_line.split()[2]) == pytest.approx(10)
+    assert float(tx_line.split()[2]) == pytest.approx(0.1)
 
 
 def test_converter_processes_multiple_selected_sheets(tmp_path):
