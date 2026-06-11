@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Iterable
+from xml.etree import ElementTree as ET
 
 from openpyxl import Workbook
 from openpyxl.chart import RadarChart, Reference
@@ -109,10 +112,12 @@ def generate_radar_report(
         f"对比图数量: {chart_counts['compare']}",
         f"输出文件: {output_path}",
         "原始 Excel 只读解析，未修改原始文件。",
+        "保存后已原地替换 xl/charts/chart*.xml 为 Excel 原生风格雷达图 XML。",
     ]
     _write_process_log(log_ws, log_lines)
 
     workbook.save(output_path)
+    _replace_saved_radar_charts_with_excel_native_xml(output_path)
     return RadarReportResult(
         output_path=output_path,
         matrix_count=len(matrices),
@@ -748,3 +753,211 @@ def _set_normalized_column_widths(ws: Worksheet) -> None:
         letter = get_column_letter(column)
         ws.column_dimensions[letter].width = 12
     ws.column_dimensions["A"].width = 22
+
+
+_CHART_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+_DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_CHART_PART_PREFIX = "xl/charts/chart"
+_CHART_PART_SUFFIX = ".xml"
+
+
+def _replace_saved_radar_charts_with_excel_native_xml(xlsx_path: Path) -> None:
+    """Rewrite saved radar chart parts with an Excel-like XML shape.
+
+    openpyxl remains responsible for workbook structure, sheets, drawings,
+    relationships, and chart data references.  After saving, this function
+    performs an in-place ZIP package rewrite of every generated radar chart
+    part so the chart XML contains the default elements that Excel writes for
+    native radar charts but openpyxl omits.
+    """
+    with zipfile.ZipFile(xlsx_path, "r") as source:
+        parts = {info.filename: info for info in source.infolist()}
+        chart_names = [name for name in parts if _is_chart_part(name)]
+        if not chart_names:
+            return
+
+        replacements: dict[str, bytes] = {}
+        for chart_name in chart_names:
+            chart_xml = source.read(chart_name)
+            replacement = _excel_native_radar_chart_xml(chart_xml)
+            if replacement is not None:
+                replacements[chart_name] = replacement
+
+        if not replacements:
+            return
+
+        with NamedTemporaryFile(delete=False, dir=xlsx_path.parent, suffix=".xlsx") as tmp_file:
+            tmp_path = Path(tmp_file.name)
+
+        try:
+            with zipfile.ZipFile(tmp_path, "w") as target:
+                for info in source.infolist():
+                    data = replacements.get(info.filename, source.read(info.filename))
+                    target.writestr(info, data)
+            tmp_path.replace(xlsx_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+
+def _is_chart_part(name: str) -> bool:
+    chart_number = name.removeprefix(_CHART_PART_PREFIX).removesuffix(_CHART_PART_SUFFIX)
+    return (
+        name.startswith(_CHART_PART_PREFIX)
+        and name.endswith(_CHART_PART_SUFFIX)
+        and chart_number.isdigit()
+    )
+
+
+def _excel_native_radar_chart_xml(chart_xml: bytes) -> bytes | None:
+    root = ET.fromstring(chart_xml)
+    chart = root.find(_c("chart"))
+    plot_area = chart.find(_c("plotArea")) if chart is not None else None
+    radar_chart = plot_area.find(_c("radarChart")) if plot_area is not None else None
+    if chart is None or plot_area is None or radar_chart is None:
+        return None
+
+    _ensure_child(root, "date1904", before={"style", "chart"}, val="0")
+    _ensure_child(root, "lang", before={"style", "chart"}, val="en-US")
+    _ensure_child(root, "roundedCorners", before={"style", "chart"}, val="0")
+    _ensure_child(root, "style", before={"chart"}, val=str(EXCEL_NATIVE_RADAR_STYLE))
+
+    title = chart.find(_c("title"))
+    if title is not None:
+        _ensure_child(title, "layout", before={"overlay"})
+        _ensure_child(title, "overlay", before={"spPr", "txPr"}, val="0")
+        _ensure_shape_properties(title)
+        _ensure_text_properties(title)
+    _ensure_child(chart, "autoTitleDeleted", before={"plotArea"}, val="0")
+
+    _ensure_child(plot_area, "layout", before={"radarChart", "catAx", "valAx"})
+    _ensure_child(radar_chart, "radarStyle", before={"varyingColors", "ser", "axId"}, val="standard")
+    _ensure_child(radar_chart, "varyingColors", before={"ser", "axId"}, val="0")
+    for series in radar_chart.findall(_c("ser")):
+        _normalise_radar_series(series)
+
+    for axis_name in ("catAx", "valAx"):
+        for axis in plot_area.findall(_c(axis_name)):
+            _normalise_axis(axis, value_axis=(axis_name == "valAx"))
+
+    legend = chart.find(_c("legend"))
+    if legend is not None:
+        _ensure_child(legend, "legendPos", before={"layout", "overlay", "spPr", "txPr"}, val="r")
+        _ensure_child(legend, "layout", before={"overlay", "spPr", "txPr"})
+        _ensure_child(legend, "overlay", before={"spPr", "txPr"}, val="0")
+        _ensure_text_properties(legend)
+
+    _ensure_child(chart, "plotVisOnly", before={"dispBlanksAs", "showDLblsOverMax"}, val="1")
+    _ensure_child(chart, "dispBlanksAs", before={"showDLblsOverMax"}, val="gap")
+    _ensure_child(chart, "showDLblsOverMax", val="0")
+    _ensure_print_settings(root)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=False)
+
+
+def _normalise_radar_series(series: ET.Element) -> None:
+    sp_pr = _ensure_child(series, "spPr", before={"marker", "dPt", "dLbls", "cat", "val"})
+    _ensure_line(sp_pr)
+    marker = _ensure_child(series, "marker", before={"dPt", "dLbls", "cat", "val"})
+    _ensure_child(marker, "symbol", before={"size", "spPr"}, val="none")
+    _ensure_child(marker, "size", before={"spPr"}, val="5")
+    marker_sp_pr = _ensure_child(marker, "spPr")
+    _ensure_line(marker_sp_pr)
+
+
+def _normalise_axis(axis: ET.Element, value_axis: bool) -> None:
+    _ensure_child(axis, "delete", before={"axPos", "numFmt", "majorGridlines", "majorTickMark"}, val="0")
+    _ensure_child(
+        axis,
+        "numFmt",
+        before={"majorGridlines", "majorTickMark", "minorTickMark"},
+        formatCode="General",
+        sourceLinked="1",
+    )
+    _ensure_child(axis, "majorTickMark", before={"minorTickMark", "tickLblPos", "spPr", "txPr"}, val="none")
+    _ensure_child(axis, "minorTickMark", before={"tickLblPos", "spPr", "txPr"}, val="none")
+    _ensure_child(axis, "tickLblPos", before={"spPr", "txPr", "crossAx", "crosses"}, val="nextTo")
+    _ensure_shape_properties(axis)
+    _ensure_text_properties(axis)
+    if value_axis:
+        _ensure_child(axis, "crosses", before={"crossBetween"}, val="autoZero")
+        _ensure_child(axis, "crossBetween", val="between")
+
+
+def _ensure_print_settings(root: ET.Element) -> None:
+    print_settings = _ensure_child(root, "printSettings")
+    _ensure_child(print_settings, "headerFooter")
+    margins = _ensure_child(print_settings, "pageMargins")
+    margin_defaults = {
+        "l": "0.7",
+        "r": "0.7",
+        "t": "0.75",
+        "b": "0.75",
+        "header": "0.3",
+        "footer": "0.3",
+    }
+    for attr, value in margin_defaults.items():
+        margins.set(attr, value)
+    _ensure_child(print_settings, "pageSetup")
+
+
+def _ensure_shape_properties(parent: ET.Element) -> ET.Element:
+    sp_pr = _ensure_child(parent, "spPr", before={"txPr", "crossAx", "crosses"})
+    _ensure_line(sp_pr)
+    return sp_pr
+
+
+def _ensure_line(sp_pr: ET.Element) -> ET.Element:
+    line = sp_pr.find(_a("ln"))
+    if line is None:
+        line = ET.SubElement(sp_pr, _a("ln"))
+    if line.find(_a("prstDash")) is None:
+        ET.SubElement(line, _a("prstDash"), {"val": "solid"})
+    return line
+
+
+def _ensure_text_properties(parent: ET.Element) -> ET.Element:
+    tx_pr = _ensure_child(parent, "txPr", before={"crossAx", "crosses"})
+    if tx_pr.find(_a("bodyPr")) is None:
+        ET.SubElement(tx_pr, _a("bodyPr"))
+    if tx_pr.find(_a("lstStyle")) is None:
+        ET.SubElement(tx_pr, _a("lstStyle"))
+    if tx_pr.find(_a("p")) is None:
+        paragraph = ET.SubElement(tx_pr, _a("p"))
+        paragraph_properties = ET.SubElement(paragraph, _a("pPr"))
+        ET.SubElement(paragraph_properties, _a("defRPr"))
+    return tx_pr
+
+
+def _ensure_child(
+    parent: ET.Element,
+    tag_name: str,
+    before: set[str] | None = None,
+    **attributes: str,
+) -> ET.Element:
+    tag = _c(tag_name)
+    child = parent.find(tag)
+    if child is None:
+        child = ET.Element(tag)
+        insert_at = _insertion_index(parent, before or set())
+        parent.insert(insert_at, child)
+    for name, value in attributes.items():
+        child.set(name, value)
+    return child
+
+
+def _insertion_index(parent: ET.Element, before: set[str]) -> int:
+    if not before:
+        return len(parent)
+    before_tags = {_c(tag) for tag in before}
+    for index, child in enumerate(list(parent)):
+        if child.tag in before_tags:
+            return index
+    return len(parent)
+
+
+def _c(tag_name: str) -> str:
+    return f"{{{_CHART_NS}}}{tag_name}"
+
+
+def _a(tag_name: str) -> str:
+    return f"{{{_DRAWING_NS}}}{tag_name}"
