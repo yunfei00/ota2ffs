@@ -7,6 +7,7 @@ from PySide6.QtCore import QSettings, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QGridLayout,
@@ -48,6 +49,7 @@ class MainWindow(QMainWindow):
         self.output_dir: Path | None = get_default_output_dir()
         self.last_output_dir: Path | None = self.output_dir
         self._updating_sheet_item = False
+        self._sheet_selection_order: list[str] = []
         self._build_ui()
         self._apply_styles()
         self._load_last_excel()
@@ -120,8 +122,14 @@ class MainWindow(QMainWindow):
         self.sheet_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.sheet_list.setUniformItemSizes(True)
         self.sheet_list.itemChanged.connect(self._update_sheet_item_label)
+        self.delta_report_checkbox = QCheckBox("生成场景差值图（以第一个选中 Sheet 为基准）")
+        self.delta_report_checkbox.setChecked(False)
+        self.delta_report_checkbox.stateChanged.connect(self._update_delta_base_label)
+        self.delta_base_label = QLabel("当前差值基准：未启用")
         sheet_layout.addLayout(sheet_buttons)
         sheet_layout.addWidget(self.sheet_list)
+        sheet_layout.addWidget(self.delta_report_checkbox)
+        sheet_layout.addWidget(self.delta_base_label)
 
         log_group = QGroupBox("转换日志")
         log_layout = QVBoxLayout(log_group)
@@ -271,21 +279,27 @@ class MainWindow(QMainWindow):
 
     def load_sheet_names(self) -> None:
         self.sheet_list.clear()
+        self._sheet_selection_order = []
         if self.excel_path is None:
+            self._update_delta_base_label()
             return
         try:
             workbook = load_workbook(self.excel_path, read_only=True, data_only=True)
+            sheet_names = list(workbook.sheetnames)
             for sheet_name in workbook.sheetnames:
                 item = QListWidgetItem(self._sheet_item_text(sheet_name, True))
                 item.setData(Qt.UserRole, sheet_name)
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                 item.setCheckState(Qt.Checked)
                 self.sheet_list.addItem(item)
+            self._sheet_selection_order = sheet_names
             workbook.close()
             self._update_sheet_list_height()
+            self._update_delta_base_label()
             self.append_log(f"已读取 {self.sheet_list.count()} 个 sheet")
         except Exception as exc:
             self._update_sheet_list_height()
+            self._update_delta_base_label()
             QMessageBox.critical(self, "读取失败", str(exc))
             self.append_log(f"[失败] 读取 sheet 列表: {exc}")
 
@@ -293,14 +307,34 @@ class MainWindow(QMainWindow):
         state = Qt.Checked if checked else Qt.Unchecked
         for index in range(self.sheet_list.count()):
             self.sheet_list.item(index).setCheckState(state)
+        self._sheet_selection_order = (
+            [self._sheet_name_for_item(self.sheet_list.item(index)) for index in range(self.sheet_list.count())]
+            if checked
+            else []
+        )
+        self._update_delta_base_label()
 
     def selected_sheets(self) -> list[str]:
-        sheets: list[str] = []
+        checked_sheets: dict[str, None] = {}
         for index in range(self.sheet_list.count()):
             item = self.sheet_list.item(index)
             if item.checkState() == Qt.Checked:
-                sheets.append(self._sheet_name_for_item(item))
-        return sheets
+                checked_sheets[self._sheet_name_for_item(item)] = None
+        ordered_sheets = [sheet_name for sheet_name in self._sheet_selection_order if sheet_name in checked_sheets]
+        ordered_sheets.extend(sheet_name for sheet_name in checked_sheets if sheet_name not in ordered_sheets)
+        return ordered_sheets
+
+    def _update_delta_base_label(self, *_args) -> None:
+        if not hasattr(self, "delta_base_label"):
+            return
+        if not self.delta_report_checkbox.isChecked():
+            self.delta_base_label.setText("当前差值基准：未启用")
+            return
+        sheets = self.selected_sheets()
+        if len(sheets) < 2:
+            self.delta_base_label.setText("当前差值基准：至少选择 2 个 Sheet")
+            return
+        self.delta_base_label.setText(f"当前差值基准：{sheets[0]}")
 
     def start_conversion(self) -> None:
         if self.excel_path is None:
@@ -354,10 +388,16 @@ class MainWindow(QMainWindow):
         self.radar_button.setEnabled(False)
         self.append_log("开始生成雷达图报表...")
         try:
-            result = generate_radar_report(self.excel_path, self.output_dir, sheets)
+            result = generate_radar_report(
+                self.excel_path,
+                self.output_dir,
+                sheets,
+                include_delta=self.delta_report_checkbox.isChecked(),
+            )
             self.append_log(f"解析到矩阵数量: {result.matrix_count}")
             self.append_log(f"生成单图数量: {result.single_chart_count}")
             self.append_log(f"生成对比图数量: {result.compare_chart_count}")
+            self.append_log(f"生成差值图数量: {result.delta_chart_count}")
             self.append_log(f"雷达图报表: {result.output_path}")
             self.last_output_dir = result.output_path.parent
             self.append_log(f"可打开目录: {self.last_output_dir}")
@@ -376,8 +416,13 @@ class MainWindow(QMainWindow):
         try:
             sheet_name = self._sheet_name_for_item(item)
             checked = item.checkState() == Qt.Checked
+            if checked and sheet_name not in self._sheet_selection_order:
+                self._sheet_selection_order.append(sheet_name)
+            elif not checked:
+                self._sheet_selection_order = [name for name in self._sheet_selection_order if name != sheet_name]
             item.setText(self._sheet_item_text(sheet_name, checked))
             item.setData(Qt.UserRole, sheet_name)
+            self._update_delta_base_label()
         finally:
             self._updating_sheet_item = False
 

@@ -50,6 +50,7 @@ class RadarReportResult:
     matrix_count: int
     single_chart_count: int
     compare_chart_count: int
+    delta_chart_count: int
     log_lines: list[str] = field(default_factory=list)
 
 
@@ -83,6 +84,7 @@ def generate_radar_report(
     excel_path: str | Path,
     output_dir: str | Path,
     selected_sheets: Iterable[str] | None = None,
+    include_delta: bool = False,
 ) -> RadarReportResult:
     excel_path = Path(excel_path)
     output_dir = Path(output_dir)
@@ -100,12 +102,20 @@ def generate_radar_report(
     data_ws = workbook.create_sheet("Normalized_Data")
     log_ws = workbook.create_sheet("Process_Log")
 
-    chart_counts = {"single": 0, "compare": 0}
-    data_cursor = _prepare_normalized_data(data_ws, matrices, include_compare=_has_multiple_sheets(matrices))
+    chart_counts = {"single": 0, "compare": 0, "delta": 0}
+    include_delta = include_delta and _has_multiple_sheets(matrices)
+    data_cursor = _prepare_normalized_data(
+        data_ws,
+        matrices,
+        include_compare=_has_multiple_sheets(matrices),
+        include_delta=include_delta,
+    )
     current_row = 1
 
     if _has_multiple_sheets(matrices):
         current_row = add_compare_charts(report_ws, data_ws, matrices, current_row, 1, data_cursor, chart_counts)
+        if include_delta:
+            current_row = add_delta_charts(report_ws, data_ws, matrices, current_row, 1, data_cursor, chart_counts)
     else:
         for matrix in matrices:
             current_row = add_matrix_area(report_ws, data_ws, matrix, current_row, 1, data_cursor, chart_counts)
@@ -114,6 +124,7 @@ def generate_radar_report(
         f"解析矩阵数量: {len(matrices)}",
         f"单图数量: {chart_counts['single']}",
         f"对比图数量: {chart_counts['compare']}",
+        f"差值图数量: {chart_counts['delta']}",
         f"输出文件: {output_path}",
         "原始 Excel 只读解析，未修改原始文件。",
         "保存后已原地替换 xl/charts/chart*.xml 为 Excel 原生风格雷达图 XML。",
@@ -127,6 +138,7 @@ def generate_radar_report(
         matrix_count=len(matrices),
         single_chart_count=chart_counts["single"],
         compare_chart_count=chart_counts["compare"],
+        delta_chart_count=chart_counts["delta"],
         log_lines=log_lines,
     )
 
@@ -223,6 +235,47 @@ def add_compare_charts(
     return current_row
 
 
+def add_delta_charts(
+    report_ws: Worksheet,
+    data_ws: Worksheet,
+    matrices: list[PatternMatrix],
+    start_row: int,
+    start_col: int,
+    data_cursor: dict[str, object] | None = None,
+    chart_counts: dict[str, int] | None = None,
+) -> int:
+    if data_cursor is None:
+        data_cursor = {"row": 1}
+    if chart_counts is None:
+        chart_counts = {"single": 0, "compare": 0, "delta": 0}
+    chart_counts.setdefault("delta", 0)
+
+    report_ws.cell(row=start_row, column=start_col, value="Delta Charts")
+    _style_report_title(report_ws, start_row, start_col)
+
+    current_row = start_row + 1
+    for block_name in _ordered_block_names(matrices):
+        block_matrices = [matrix for matrix in matrices if matrix.block_name == block_name]
+        pairs = _delta_matrix_pairs(block_matrices)
+        if not pairs:
+            continue
+
+        report_ws.cell(row=current_row, column=start_col, value=f"Block: {block_name} / Base: {pairs[0][0].sheet_name}")
+        _style_report_subtitle(report_ws, current_row, start_col)
+        _add_delta_row_charts(report_ws, data_ws, pairs, current_row + 1, start_col, data_cursor, chart_counts)
+        _add_delta_col_charts(
+            report_ws,
+            data_ws,
+            pairs,
+            current_row + CHART_ROW_STEP + 1,
+            start_col,
+            data_cursor,
+            chart_counts,
+        )
+        current_row += MATRIX_AREA_HEIGHT
+    return current_row
+
+
 def _add_compare_row_charts(
     report_ws: Worksheet,
     data_ws: Worksheet,
@@ -271,24 +324,76 @@ def _add_compare_col_charts(
     return count
 
 
+def _add_delta_row_charts(
+    report_ws: Worksheet,
+    data_ws: Worksheet,
+    pairs: list[tuple[PatternMatrix, PatternMatrix]],
+    start_row: int,
+    start_col: int,
+    data_cursor: dict[str, object],
+    chart_counts: dict[str, int],
+) -> int:
+    count = 0
+    if not pairs:
+        return count
+    base_matrix = pairs[0][0]
+    for row_angle in _delta_row_angles(pairs):
+        title = f"Delta_{base_matrix.block_name}_Row_{_angle_text(row_angle)}"
+        table = _get_or_write_delta_table(data_ws, data_cursor, "row", pairs, row_angle)
+        chart = _create_chart_from_series_table(data_ws, title, table)
+        _place_chart(report_ws, chart, start_row, start_col + count * CHART_COLUMN_STEP)
+        chart_counts["delta"] += 1
+        count += 1
+    return count
+
+
+def _add_delta_col_charts(
+    report_ws: Worksheet,
+    data_ws: Worksheet,
+    pairs: list[tuple[PatternMatrix, PatternMatrix]],
+    start_row: int,
+    start_col: int,
+    data_cursor: dict[str, object],
+    chart_counts: dict[str, int],
+) -> int:
+    count = 0
+    if not pairs:
+        return count
+    base_matrix = pairs[0][0]
+    for col_angle in _delta_col_angles(pairs):
+        title = f"Delta_{base_matrix.block_name}_Col_{_angle_text(col_angle)}"
+        table = _get_or_write_delta_table(data_ws, data_cursor, "col", pairs, col_angle)
+        chart = _create_chart_from_series_table(data_ws, title, table)
+        _place_chart(report_ws, chart, start_row, start_col + count * CHART_COLUMN_STEP)
+        chart_counts["delta"] += 1
+        count += 1
+    return count
+
+
 def _prepare_normalized_data(
     ws: Worksheet,
     matrices: list[PatternMatrix],
     include_compare: bool,
+    include_delta: bool,
 ) -> dict[str, object]:
     layout: dict[str, object] = {
         "row": 1,
         "matrix_tables": {},
         "compare_tables": {},
+        "delta_tables": {},
     }
     ws.freeze_panes = "B2"
 
     current_row = 1
     for block_name in _ordered_block_names(matrices):
         block_matrices = [matrix for matrix in matrices if matrix.block_name == block_name]
-        max_source_width = max((len(matrix.col_angles) + 1 for matrix in block_matrices), default=1)
+        max_source_width = max(
+            (max(len(matrix.row_angles), len(matrix.col_angles)) + 1 for matrix in block_matrices),
+            default=1,
+        )
         source_col = 1
         compare_col = source_col + max_source_width + DATA_COMPARE_GAP_COLUMNS
+        delta_col = compare_col + max_source_width + DATA_COMPARE_GAP_COLUMNS
 
         ws.cell(row=current_row, column=source_col, value=f"Block: {block_name}")
         _style_data_section_title(ws, current_row, source_col, max_source_width)
@@ -304,7 +409,13 @@ def _prepare_normalized_data(
             _style_data_section_title(ws, current_row, compare_col, max_source_width, compare=True)
             compare_row = _write_compare_tables_for_block(ws, layout, block_matrices, compare_row, compare_col)
 
-        current_row = max(source_row, compare_row) + DATA_BLOCK_GAP_ROWS
+        delta_row = current_row + 1
+        if include_delta and _delta_matrix_pairs(block_matrices):
+            ws.cell(row=current_row, column=delta_col, value=f"Delta Data: {block_name}")
+            _style_data_section_title(ws, current_row, delta_col, max_source_width, compare=True)
+            delta_row = _write_delta_tables_for_block(ws, layout, block_matrices, delta_row, delta_col)
+
+        current_row = max(source_row, compare_row, delta_row) + DATA_BLOCK_GAP_ROWS
 
     layout["row"] = current_row
     _set_normalized_column_widths(ws)
@@ -402,6 +513,34 @@ def _write_compare_tables_for_block(
     return current_row
 
 
+def _write_delta_tables_for_block(
+    ws: Worksheet,
+    layout: dict[str, object],
+    block_matrices: list[PatternMatrix],
+    start_row: int,
+    start_col: int,
+) -> int:
+    current_row = start_row
+    pairs = _delta_matrix_pairs(block_matrices)
+    if not pairs:
+        return current_row
+    base_matrix = pairs[0][0]
+
+    for row_angle in _delta_row_angles(pairs):
+        title, axes, series = _delta_row_formula_payload(layout, pairs, row_angle)
+        table = _write_series_table(ws, title, axes, series, current_row, start_col)
+        _delta_tables(layout)[_delta_key("row", base_matrix, row_angle)] = table
+        current_row = table.end_row + DATA_TABLE_GAP_ROWS
+
+    for col_angle in _delta_col_angles(pairs):
+        title, axes, series = _delta_col_formula_payload(layout, pairs, col_angle)
+        table = _write_series_table(ws, title, axes, series, current_row, start_col)
+        _delta_tables(layout)[_delta_key("col", base_matrix, col_angle)] = table
+        current_row = table.end_row + DATA_TABLE_GAP_ROWS
+
+    return current_row
+
+
 def _get_or_write_matrix_table(
     data_ws: Worksheet,
     data_cursor: dict[str, object],
@@ -440,6 +579,29 @@ def _get_or_write_compare_table(
                 if kind == "row"
                 else _compare_col_payload(block_matrices, angle)
             )
+        start_row = int(data_cursor.get("row", 1))
+        table = _write_series_table(data_ws, title, axes, series, start_row, 1)
+        tables[key] = table
+        data_cursor["row"] = table.end_row + DATA_TABLE_GAP_ROWS
+    return tables[key]
+
+
+def _get_or_write_delta_table(
+    data_ws: Worksheet,
+    data_cursor: dict[str, object],
+    kind: str,
+    pairs: list[tuple[PatternMatrix, PatternMatrix]],
+    angle: float,
+) -> DataTableRef:
+    base_matrix = pairs[0][0]
+    tables = _delta_tables(data_cursor)
+    key = _delta_key(kind, base_matrix, angle)
+    if key not in tables:
+        title, axes, series = (
+            _delta_row_formula_payload(data_cursor, pairs, angle)
+            if kind == "row"
+            else _delta_col_formula_payload(data_cursor, pairs, angle)
+        )
         start_row = int(data_cursor.get("row", 1))
         table = _write_series_table(data_ws, title, axes, series, start_row, 1)
         tables[key] = table
@@ -611,6 +773,58 @@ def _compare_col_formula_payload(
     return f"Compare_{block_name}_Col_{_angle_text(col_angle)}", axes, series
 
 
+def _delta_row_formula_payload(
+    layout: dict[str, object],
+    pairs: list[tuple[PatternMatrix, PatternMatrix]],
+    row_angle: float,
+) -> tuple[str, list[float], list[tuple[str, list[float | str]]]]:
+    base_matrix = pairs[0][0]
+    active_pairs = [
+        (base_matrix, target_matrix)
+        for base_matrix, target_matrix in pairs
+        if row_angle in base_matrix.row_angles and row_angle in target_matrix.row_angles
+    ]
+    axes = _union_common_target_angles(active_pairs, axis="col")
+    series = [
+        (
+            f"{target_matrix.sheet_name} - {base_matrix.sheet_name}",
+            [_delta_formula_or_zero(layout, base_matrix, target_matrix, row_angle, col_angle) for col_angle in axes],
+        )
+        for base_matrix, target_matrix in active_pairs
+    ]
+    return (
+        f"Delta_{base_matrix.block_name}_Row_{_angle_text(row_angle)}",
+        axes,
+        series,
+    )
+
+
+def _delta_col_formula_payload(
+    layout: dict[str, object],
+    pairs: list[tuple[PatternMatrix, PatternMatrix]],
+    col_angle: float,
+) -> tuple[str, list[float], list[tuple[str, list[float | str]]]]:
+    base_matrix = pairs[0][0]
+    active_pairs = [
+        (base_matrix, target_matrix)
+        for base_matrix, target_matrix in pairs
+        if col_angle in base_matrix.col_angles and col_angle in target_matrix.col_angles
+    ]
+    axes = _union_common_target_angles(active_pairs, axis="row")
+    series = [
+        (
+            f"{target_matrix.sheet_name} - {base_matrix.sheet_name}",
+            [_delta_formula_or_zero(layout, base_matrix, target_matrix, row_angle, col_angle) for row_angle in axes],
+        )
+        for base_matrix, target_matrix in active_pairs
+    ]
+    return (
+        f"Delta_{base_matrix.block_name}_Col_{_angle_text(col_angle)}",
+        axes,
+        series,
+    )
+
+
 def _row_formula_or_zero(
     layout: dict[str, object],
     matrix: PatternMatrix,
@@ -627,6 +841,31 @@ def _row_formula_or_zero(
     return _cell_formula(row, col)
 
 
+def _delta_formula_or_zero(
+    layout: dict[str, object],
+    base_matrix: PatternMatrix,
+    target_matrix: PatternMatrix,
+    row_angle: float,
+    col_angle: float,
+) -> float | str:
+    if (
+        row_angle not in base_matrix.row_angles
+        or row_angle not in target_matrix.row_angles
+        or col_angle not in base_matrix.col_angles
+        or col_angle not in target_matrix.col_angles
+    ):
+        return 0.0
+
+    base_ref = _matrix_cell_reference(layout, base_matrix, row_angle, col_angle)
+    target_ref = _matrix_cell_reference(layout, target_matrix, row_angle, col_angle)
+    if base_ref is not None and target_ref is not None:
+        return f"={target_ref}-{base_ref}"
+
+    target_value = _row_series_for_axes(target_matrix, row_angle, [col_angle])[0]
+    base_value = _row_series_for_axes(base_matrix, row_angle, [col_angle])[0]
+    return target_value - base_value
+
+
 def _col_formula_or_zero(
     layout: dict[str, object],
     matrix: PatternMatrix,
@@ -641,6 +880,20 @@ def _col_formula_or_zero(
     row = table.first_data_row + matrix.row_angles.index(row_angle)
     col = table.start_col + matrix.col_angles.index(col_angle) + 1
     return _cell_formula(row, col)
+
+
+def _matrix_cell_reference(
+    layout: dict[str, object],
+    matrix: PatternMatrix,
+    row_angle: float,
+    col_angle: float,
+) -> str | None:
+    table = _matrix_tables(layout).get(_matrix_key(matrix))
+    if table is None or row_angle not in matrix.row_angles or col_angle not in matrix.col_angles:
+        return None
+    row = table.first_data_row + matrix.row_angles.index(row_angle)
+    col = table.start_col + matrix.col_angles.index(col_angle) + 1
+    return _cell_reference(row, col)
 
 
 def _ordered_block_names(matrices: list[PatternMatrix]) -> list[str]:
@@ -667,6 +920,48 @@ def _has_multiple_sheets(matrices: list[PatternMatrix]) -> bool:
     return len({matrix.sheet_name for matrix in matrices}) > 1
 
 
+def _delta_matrix_pairs(block_matrices: list[PatternMatrix]) -> list[tuple[PatternMatrix, PatternMatrix]]:
+    if len({matrix.sheet_name for matrix in block_matrices}) < 2:
+        return []
+    base_matrix = block_matrices[0]
+    return [(base_matrix, matrix) for matrix in block_matrices[1:] if matrix.sheet_name != base_matrix.sheet_name]
+
+
+def _delta_row_angles(pairs: list[tuple[PatternMatrix, PatternMatrix]]) -> list[float]:
+    return sorted(
+        {
+            row_angle
+            for base_matrix, target_matrix in pairs
+            for row_angle in _common_angles([base_matrix.row_angles, target_matrix.row_angles])
+            if _common_angles([base_matrix.col_angles, target_matrix.col_angles])
+        }
+    )
+
+
+def _delta_col_angles(pairs: list[tuple[PatternMatrix, PatternMatrix]]) -> list[float]:
+    return sorted(
+        {
+            col_angle
+            for base_matrix, target_matrix in pairs
+            for col_angle in _common_angles([base_matrix.col_angles, target_matrix.col_angles])
+            if _common_angles([base_matrix.row_angles, target_matrix.row_angles])
+        }
+    )
+
+
+def _union_common_target_angles(pairs: list[tuple[PatternMatrix, PatternMatrix]], axis: str) -> list[float]:
+    angle_sets = [
+        _common_angles(
+            [
+                base_matrix.row_angles if axis == "row" else base_matrix.col_angles,
+                target_matrix.row_angles if axis == "row" else target_matrix.col_angles,
+            ]
+        )
+        for base_matrix, target_matrix in pairs
+    ]
+    return _union_angles(angle_sets)
+
+
 def _write_process_log(ws: Worksheet, lines: list[str]) -> None:
     ws.cell(row=1, column=1, value="Process Log")
     for index, line in enumerate(lines, start=2):
@@ -687,6 +982,14 @@ def _compare_key(kind: str, block_name: str, angle: float) -> tuple[str, str, fl
     return kind, block_name, angle
 
 
+def _delta_key(
+    kind: str,
+    base_matrix: PatternMatrix,
+    angle: float,
+) -> tuple[str, str, str, float]:
+    return kind, base_matrix.sheet_name, base_matrix.block_name, angle
+
+
 def _matrix_tables(layout: dict[str, object]) -> dict[tuple[int, str, str], DataTableRef]:
     return layout.setdefault("matrix_tables", {})  # type: ignore[return-value]
 
@@ -695,13 +998,21 @@ def _compare_tables(layout: dict[str, object]) -> dict[tuple[str, str, float], D
     return layout.setdefault("compare_tables", {})  # type: ignore[return-value]
 
 
+def _delta_tables(layout: dict[str, object]) -> dict[tuple[str, str, str, float], DataTableRef]:
+    return layout.setdefault("delta_tables", {})  # type: ignore[return-value]
+
+
 def _has_source_matrix_tables(layout: dict[str, object], matrices: list[PatternMatrix]) -> bool:
     tables = _matrix_tables(layout)
     return all(_matrix_key(matrix) in tables for matrix in matrices)
 
 
 def _cell_formula(row: int, col: int) -> str:
-    return f"=${get_column_letter(col)}${row}"
+    return f"={_cell_reference(row, col)}"
+
+
+def _cell_reference(row: int, col: int) -> str:
+    return f"${get_column_letter(col)}${row}"
 
 
 def _style_report_title(ws: Worksheet, row: int, col: int) -> None:

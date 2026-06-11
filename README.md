@@ -188,6 +188,14 @@ Col 雷达图含义：
 - 多 sheet 模式不会再重复生成每个 sheet 的独立 Row/Col 图，避免相同格式数据占用过多横向空间。
 - `Theta`、`Phi`、`Total` 对比图按 block 分成多个纵向区域；每个 block 内第一行放 Row 对比图，第二行放 Col 对比图。
 
+场景差值图：
+
+- 勾选“生成场景差值图”后，会以第一个选中的 sheet 作为基础场景。
+- 后续每个 sheet 会分别与基础场景做差值，差值公式为 `目标 sheet 标准化值 - 基础 sheet 标准化值`。
+- 差值数据写入 `Normalized_Data` 的 `Delta Data` 区域，并通过公式引用左侧标准化矩阵。
+- 差值图写入 `Radar_Report` 的 `Delta Charts` 区域；相同 block 和角度的多个差值 series 会合并到同一张雷达图中，便于直接对比。
+- 只对相同 `block_name` 且双方共同存在的角度生成差值数据和雷达图。
+
 ## 输出文件命名
 
 假设 Excel 文件名为 `Input.xlsx`，sheet 名为 `Sheet1`，输出会生成到 `output/Input/` 子目录：

@@ -163,6 +163,7 @@ def test_multiple_sheets_generate_compare_charts_and_output_xlsx(tmp_path):
     assert result.matrix_count == 6
     assert result.single_chart_count == 0
     assert result.compare_chart_count == 12
+    assert result.delta_chart_count == 0
 
 
 def test_compare_report_layout_keeps_blocks_vertical_and_compare_data_right(tmp_path):
@@ -221,6 +222,46 @@ def test_compare_data_cells_link_to_source_matrix_cells(tmp_path):
         output_workbook.close()
 
 
+def test_delta_charts_use_first_selected_sheet_as_formula_baseline(tmp_path):
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    _add_v2_sheet(workbook, "S1", -10)
+    _add_v2_sheet(workbook, "S2", -20)
+    _add_v2_sheet(workbook, "S3", -30)
+    excel_path = tmp_path / "delta_input.xlsx"
+    workbook.save(excel_path)
+
+    result = generate_radar_report(excel_path, tmp_path / "out", ["S1", "S2", "S3"], include_delta=True)
+
+    output_workbook = load_workbook(result.output_path, data_only=False)
+    try:
+        ws = output_workbook["Normalized_Data"]
+        positions = _positions_by_value(ws)
+        report_positions = _positions_by_value(output_workbook["Radar_Report"])
+
+        assert result.single_chart_count == 0
+        assert result.compare_chart_count == 12
+        assert result.delta_chart_count == 12
+        assert len(output_workbook["Radar_Report"]._charts) == 24
+        assert "Delta Charts" in report_positions
+        assert "Delta Data: Theta" in positions
+        assert "Delta_Theta_Row_0" in positions
+
+        base_row, base_col = positions["Sheet: S1 / Block: Theta"]
+        target_row, target_col = positions["Sheet: S2 / Block: Theta"]
+        delta_row, delta_col = positions["Delta_Theta_Row_0"]
+        base_cell = f"${get_column_letter(base_col + 1)}${base_row + 2}"
+        target_cell = f"${get_column_letter(target_col + 1)}${target_row + 2}"
+        delta_value_cell = ws.cell(row=delta_row + 2, column=delta_col + 1)
+
+        assert ws.cell(row=delta_row + 2, column=delta_col).value == "S2 - S1"
+        assert ws.cell(row=delta_row + 3, column=delta_col).value == "S3 - S1"
+        assert delta_value_cell.data_type == "f"
+        assert delta_value_cell.value == f"={target_cell}-{base_cell}"
+    finally:
+        output_workbook.close()
+
+
 def test_mixed_v1_v2_compare_uses_v1_output_phi_angles(tmp_path):
     workbook = Workbook()
     workbook.remove(workbook.active)
@@ -240,6 +281,7 @@ def test_mixed_v1_v2_compare_uses_v1_output_phi_angles(tmp_path):
         assert "Compare_Theta_Row_-180" not in positions
         assert result.matrix_count == 5
         assert result.compare_chart_count == 8
+        assert result.delta_chart_count == 0
     finally:
         output_workbook.close()
 
@@ -267,6 +309,7 @@ def test_v2_sample_sheets_are_merged_into_compare_charts(tmp_path):
         assert result.matrix_count == 6
         assert result.single_chart_count == 0
         assert result.compare_chart_count == 42
+        assert result.delta_chart_count == 0
         assert len(workbook["Radar_Report"]._charts) == 42
     finally:
         workbook.close()
