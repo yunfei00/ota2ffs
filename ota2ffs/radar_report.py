@@ -18,9 +18,13 @@ from .matrix_model import PatternMatrix
 from .matrix_parser import parse_matrices_from_workbook
 
 
-CHART_WIDTH = 12
-CHART_HEIGHT = 8
-EXCEL_NATIVE_RADAR_STYLE = 26
+# Excel's default inserted chart size: 360 pt x 216 pt.
+CHART_WIDTH = 12.7
+CHART_HEIGHT = 7.62
+EXCEL_NATIVE_RADAR_STYLE = 2
+SERIES_LINE_WIDTH_EMU = "28575"
+GRID_LINE_WIDTH_EMU = "9525"
+SERIES_LINE_SCHEME_COLORS = ("accent1", "accent2", "accent3", "accent4", "accent5", "accent6")
 CHART_COLUMN_STEP = 8
 CHART_ROW_STEP = 16
 MATRIX_AREA_HEIGHT = 36
@@ -515,7 +519,7 @@ def _create_chart_from_series_table(data_ws: Worksheet, title: str, table: DataT
 
 def _new_radar_chart(title: str) -> RadarChart:
     chart = RadarChart()
-    chart.type = "standard"
+    chart.type = "marker"
     chart.style = EXCEL_NATIVE_RADAR_STYLE
     chart.title = title
     chart.width = CHART_WIDTH
@@ -760,6 +764,9 @@ _DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _CHART_PART_PREFIX = "xl/charts/chart"
 _CHART_PART_SUFFIX = ".xml"
 
+ET.register_namespace("c", _CHART_NS)
+ET.register_namespace("a", _DRAWING_NS)
+
 
 def _replace_saved_radar_charts_with_excel_native_xml(xlsx_path: Path) -> None:
     """Rewrite saved radar chart parts with an Excel-like XML shape.
@@ -770,34 +777,40 @@ def _replace_saved_radar_charts_with_excel_native_xml(xlsx_path: Path) -> None:
     part so the chart XML contains the default elements that Excel writes for
     native radar charts but openpyxl omits.
     """
-    with zipfile.ZipFile(xlsx_path, "r") as source:
-        parts = {info.filename: info for info in source.infolist()}
-        chart_names = [name for name in parts if _is_chart_part(name)]
-        if not chart_names:
-            return
+    tmp_path: Path | None = None
+    payloads: list[tuple[zipfile.ZipInfo, bytes]] = []
+    try:
+        with zipfile.ZipFile(xlsx_path, "r") as source:
+            parts = {info.filename: info for info in source.infolist()}
+            chart_names = [name for name in parts if _is_chart_part(name)]
+            if not chart_names:
+                return
 
-        replacements: dict[str, bytes] = {}
-        for chart_name in chart_names:
-            chart_xml = source.read(chart_name)
-            replacement = _excel_native_radar_chart_xml(chart_xml)
-            if replacement is not None:
-                replacements[chart_name] = replacement
+            replacements: dict[str, bytes] = {}
+            for chart_name in chart_names:
+                chart_xml = source.read(chart_name)
+                replacement = _excel_native_radar_chart_xml(chart_xml)
+                if replacement is not None:
+                    replacements[chart_name] = replacement
 
-        if not replacements:
-            return
+            if not replacements:
+                return
+
+            for info in source.infolist():
+                payloads.append((info, replacements.get(info.filename, source.read(info.filename))))
 
         with NamedTemporaryFile(delete=False, dir=xlsx_path.parent, suffix=".xlsx") as tmp_file:
             tmp_path = Path(tmp_file.name)
 
-        try:
-            with zipfile.ZipFile(tmp_path, "w") as target:
-                for info in source.infolist():
-                    data = replacements.get(info.filename, source.read(info.filename))
-                    target.writestr(info, data)
-            tmp_path.replace(xlsx_path)
-        except Exception:
+        with zipfile.ZipFile(tmp_path, "w") as target:
+            for info, data in payloads:
+                target.writestr(info, data)
+
+        tmp_path.replace(xlsx_path)
+    except Exception:
+        if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
-            raise
+        raise
 
 
 def _is_chart_part(name: str) -> bool:
@@ -818,54 +831,88 @@ def _excel_native_radar_chart_xml(chart_xml: bytes) -> bytes | None:
         return None
 
     _ensure_child(root, "date1904", before={"style", "chart"}, val="0")
-    _ensure_child(root, "lang", before={"style", "chart"}, val="en-US")
+    _ensure_child(root, "lang", before={"style", "chart"}, val="zh-CN")
     _ensure_child(root, "roundedCorners", before={"style", "chart"}, val="0")
     _ensure_child(root, "style", before={"chart"}, val=str(EXCEL_NATIVE_RADAR_STYLE))
 
     title = chart.find(_c("title"))
     if title is not None:
-        _ensure_child(title, "layout", before={"overlay"})
         _ensure_child(title, "overlay", before={"spPr", "txPr"}, val="0")
-        _ensure_shape_properties(title)
-        _ensure_text_properties(title)
+        _set_no_fill_shape(_ensure_child(title, "spPr", before={"txPr"}))
+        _normalise_text_properties(title, font_size="1400", rotate=False)
     _ensure_child(chart, "autoTitleDeleted", before={"plotArea"}, val="0")
 
     _ensure_child(plot_area, "layout", before={"radarChart", "catAx", "valAx"})
-    _ensure_child(radar_chart, "radarStyle", before={"varyingColors", "ser", "axId"}, val="standard")
-    _ensure_child(radar_chart, "varyingColors", before={"ser", "axId"}, val="0")
+    _ensure_child(radar_chart, "radarStyle", before={"varyColors", "varyingColors", "ser", "dLbls", "axId"}, val="marker")
+    _remove_child(radar_chart, "varyingColors")
+    _ensure_child(radar_chart, "varyColors", before={"ser", "dLbls", "axId"}, val="0")
     for series in radar_chart.findall(_c("ser")):
         _normalise_radar_series(series)
+    _normalise_data_labels(radar_chart)
 
     for axis_name in ("catAx", "valAx"):
         for axis in plot_area.findall(_c(axis_name)):
             _normalise_axis(axis, value_axis=(axis_name == "valAx"))
 
     legend = chart.find(_c("legend"))
-    if legend is not None:
+    if len(radar_chart.findall(_c("ser"))) <= 1:
+        if legend is not None:
+            chart.remove(legend)
+    elif legend is not None:
         _ensure_child(legend, "legendPos", before={"layout", "overlay", "spPr", "txPr"}, val="r")
-        _ensure_child(legend, "layout", before={"overlay", "spPr", "txPr"})
         _ensure_child(legend, "overlay", before={"spPr", "txPr"}, val="0")
-        _ensure_text_properties(legend)
+        _set_no_fill_shape(_ensure_child(legend, "spPr", before={"txPr"}))
+        _normalise_text_properties(legend, font_size="900", rotate=False)
 
     _ensure_child(chart, "plotVisOnly", before={"dispBlanksAs", "showDLblsOverMax"}, val="1")
     _ensure_child(chart, "dispBlanksAs", before={"showDLblsOverMax"}, val="gap")
     _ensure_child(chart, "showDLblsOverMax", val="0")
+    _set_no_fill_shape(_ensure_child(plot_area, "spPr"))
+    _normalise_chart_space(root)
     _ensure_print_settings(root)
     return ET.tostring(root, encoding="utf-8", xml_declaration=False)
 
 
 def _normalise_radar_series(series: ET.Element) -> None:
     sp_pr = _ensure_child(series, "spPr", before={"marker", "dPt", "dLbls", "cat", "val"})
-    _ensure_line(sp_pr)
+    _normalise_series_line(sp_pr, _series_scheme_color(series))
     marker = _ensure_child(series, "marker", before={"dPt", "dLbls", "cat", "val"})
     _ensure_child(marker, "symbol", before={"size", "spPr"}, val="none")
-    _ensure_child(marker, "size", before={"spPr"}, val="5")
-    marker_sp_pr = _ensure_child(marker, "spPr")
-    _ensure_line(marker_sp_pr)
+    _remove_child(marker, "size")
+    _remove_child(marker, "spPr")
+
+
+def _normalise_series_line(sp_pr: ET.Element, scheme_color: str) -> None:
+    _clear_element(sp_pr)
+    line = sp_pr.find(_a("ln"))
+    if line is None:
+        line = ET.SubElement(sp_pr, _a("ln"))
+    line.set("w", SERIES_LINE_WIDTH_EMU)
+    line.set("cap", "rnd")
+    solid_fill = ET.SubElement(line, _a("solidFill"))
+    ET.SubElement(solid_fill, _a("schemeClr"), {"val": scheme_color})
+    ET.SubElement(line, _a("round"))
+    ET.SubElement(sp_pr, _a("effectLst"))
+
+
+def _series_scheme_color(series: ET.Element) -> str:
+    idx = series.find(_c("idx"))
+    try:
+        color_index = int(idx.get("val", "0")) if idx is not None else 0
+    except ValueError:
+        color_index = 0
+    return SERIES_LINE_SCHEME_COLORS[color_index % len(SERIES_LINE_SCHEME_COLORS)]
+
+
+def _normalise_data_labels(radar_chart: ET.Element) -> None:
+    data_labels = _ensure_child(radar_chart, "dLbls", before={"axId"})
+    for tag_name in ("showLegendKey", "showVal", "showCatName", "showSerName", "showPercent", "showBubbleSize"):
+        _ensure_child(data_labels, tag_name, val="0")
 
 
 def _normalise_axis(axis: ET.Element, value_axis: bool) -> None:
     _ensure_child(axis, "delete", before={"axPos", "numFmt", "majorGridlines", "majorTickMark"}, val="0")
+    _ensure_child(axis, "axPos", before={"numFmt", "majorGridlines", "majorTickMark"}, val="l" if value_axis else "b")
     _ensure_child(
         axis,
         "numFmt",
@@ -876,11 +923,22 @@ def _normalise_axis(axis: ET.Element, value_axis: bool) -> None:
     _ensure_child(axis, "majorTickMark", before={"minorTickMark", "tickLblPos", "spPr", "txPr"}, val="none")
     _ensure_child(axis, "minorTickMark", before={"tickLblPos", "spPr", "txPr"}, val="none")
     _ensure_child(axis, "tickLblPos", before={"spPr", "txPr", "crossAx", "crosses"}, val="nextTo")
-    _ensure_shape_properties(axis)
-    _ensure_text_properties(axis)
+    if value_axis:
+        major_gridlines = _ensure_child(axis, "majorGridlines", before={"numFmt", "majorTickMark"})
+        _set_light_line_shape(_ensure_child(major_gridlines, "spPr"))
+        _set_no_fill_shape(_ensure_child(axis, "spPr", before={"txPr", "crossAx", "crosses"}))
+    else:
+        _set_light_line_shape(_ensure_child(axis, "spPr", before={"txPr", "crossAx", "crosses"}), no_fill=True)
+    _normalise_text_properties(axis, font_size="900", rotate=True)
     if value_axis:
         _ensure_child(axis, "crosses", before={"crossBetween"}, val="autoZero")
         _ensure_child(axis, "crossBetween", val="between")
+    else:
+        _ensure_child(axis, "crosses", before={"auto", "lblAlgn", "lblOffset", "noMultiLvlLbl"}, val="autoZero")
+        _ensure_child(axis, "auto", before={"lblAlgn", "lblOffset", "noMultiLvlLbl"}, val="1")
+        _ensure_child(axis, "lblAlgn", before={"lblOffset", "noMultiLvlLbl"}, val="ctr")
+        _ensure_child(axis, "lblOffset", before={"noMultiLvlLbl"}, val="100")
+        _ensure_child(axis, "noMultiLvlLbl", val="0")
 
 
 def _ensure_print_settings(root: ET.Element) -> None:
@@ -928,6 +986,96 @@ def _ensure_text_properties(parent: ET.Element) -> ET.Element:
     return tx_pr
 
 
+def _normalise_chart_space(root: ET.Element) -> None:
+    sp_pr = _ensure_child(root, "spPr", before={"txPr", "printSettings"})
+    _clear_element(sp_pr)
+    solid_fill = ET.SubElement(sp_pr, _a("solidFill"))
+    ET.SubElement(solid_fill, _a("schemeClr"), {"val": "bg1"})
+    _append_light_line(sp_pr)
+    ET.SubElement(sp_pr, _a("effectLst"))
+    _normalise_text_properties(root, font_size=None, rotate=False)
+
+
+def _set_no_fill_shape(sp_pr: ET.Element) -> None:
+    _clear_element(sp_pr)
+    ET.SubElement(sp_pr, _a("noFill"))
+    line = ET.SubElement(sp_pr, _a("ln"))
+    ET.SubElement(line, _a("noFill"))
+    ET.SubElement(sp_pr, _a("effectLst"))
+
+
+def _set_light_line_shape(sp_pr: ET.Element, no_fill: bool = False) -> None:
+    _clear_element(sp_pr)
+    if no_fill:
+        ET.SubElement(sp_pr, _a("noFill"))
+    _append_light_line(sp_pr)
+    ET.SubElement(sp_pr, _a("effectLst"))
+
+
+def _append_light_line(parent: ET.Element) -> ET.Element:
+    line = ET.SubElement(
+        parent,
+        _a("ln"),
+        {"w": GRID_LINE_WIDTH_EMU, "cap": "flat", "cmpd": "sng", "algn": "ctr"},
+    )
+    solid_fill = ET.SubElement(line, _a("solidFill"))
+    scheme_color = ET.SubElement(solid_fill, _a("schemeClr"), {"val": "tx1"})
+    ET.SubElement(scheme_color, _a("lumMod"), {"val": "15000"})
+    ET.SubElement(scheme_color, _a("lumOff"), {"val": "85000"})
+    ET.SubElement(line, _a("round"))
+    return line
+
+
+def _normalise_text_properties(parent: ET.Element, font_size: str | None, rotate: bool) -> ET.Element:
+    tx_pr = _ensure_child(parent, "txPr", before={"crossAx", "crosses", "printSettings"})
+    _clear_element(tx_pr)
+    body_attrs = {
+        "spcFirstLastPara": "1",
+        "vertOverflow": "ellipsis",
+        "vert": "horz",
+        "wrap": "square",
+        "anchor": "ctr",
+        "anchorCtr": "1",
+    }
+    if rotate:
+        body_attrs["rot"] = "-60000000"
+    elif font_size is not None:
+        body_attrs["rot"] = "0"
+    ET.SubElement(tx_pr, _a("bodyPr"), body_attrs)
+    ET.SubElement(tx_pr, _a("lstStyle"))
+    paragraph = ET.SubElement(tx_pr, _a("p"))
+    paragraph_properties = ET.SubElement(paragraph, _a("pPr"))
+    run_attrs = {
+        "b": "0",
+        "i": "0",
+        "u": "none",
+        "strike": "noStrike",
+        "kern": "1200",
+        "baseline": "0",
+    }
+    if font_size is not None:
+        run_attrs["sz"] = font_size
+    if font_size == "1400":
+        run_attrs["spc"] = "0"
+    default_run = ET.SubElement(paragraph_properties, _a("defRPr"), run_attrs)
+    if font_size is not None:
+        solid_fill = ET.SubElement(default_run, _a("solidFill"))
+        scheme_color = ET.SubElement(solid_fill, _a("schemeClr"), {"val": "tx1"})
+        ET.SubElement(scheme_color, _a("lumMod"), {"val": "65000"})
+        ET.SubElement(scheme_color, _a("lumOff"), {"val": "35000"})
+        ET.SubElement(default_run, _a("latin"), {"typeface": "+mn-lt"})
+        ET.SubElement(default_run, _a("ea"), {"typeface": "+mn-ea"})
+        ET.SubElement(default_run, _a("cs"), {"typeface": "+mn-cs"})
+    ET.SubElement(paragraph, _a("endParaRPr"), {"lang": "zh-CN"})
+    return tx_pr
+
+
+def _clear_element(element: ET.Element) -> None:
+    element.attrib.clear()
+    for child in list(element):
+        element.remove(child)
+
+
 def _ensure_child(
     parent: ET.Element,
     tag_name: str,
@@ -943,6 +1091,12 @@ def _ensure_child(
     for name, value in attributes.items():
         child.set(name, value)
     return child
+
+
+def _remove_child(parent: ET.Element, tag_name: str) -> None:
+    child = parent.find(_c(tag_name))
+    if child is not None:
+        parent.remove(child)
 
 
 def _insertion_index(parent: ET.Element, before: set[str]) -> int:

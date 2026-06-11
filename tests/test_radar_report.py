@@ -95,7 +95,9 @@ def test_radar_charts_use_excel_native_defaults(tmp_path):
     add_row_charts(report_ws, data_ws, _matrix(), 1, 1, {"row": 1}, counts)
 
     chart = report_ws._charts[0]
-    assert chart.style == 26
+    assert chart.style == 2
+    assert chart.width == 12.7
+    assert chart.height == 7.62
     assert chart.legend is not None
     assert chart.legend.legendPos == "r"
     assert chart.dataLabels is None
@@ -104,12 +106,15 @@ def test_radar_charts_use_excel_native_defaults(tmp_path):
     workbook.save(output_path)
     with zipfile.ZipFile(output_path) as archive:
         chart_xml = archive.read("xl/charts/chart1.xml").decode("utf-8")
+        drawing_xml = archive.read("xl/drawings/drawing1.xml").decode("utf-8")
 
-    assert '<style val="26"' in chart_xml
-    assert '<radarStyle val="standard"' in chart_xml
+    assert '<style val="2"' in chart_xml
+    assert '<radarStyle val="marker"' in chart_xml
     assert "<legend>" in chart_xml
     assert "<dLbls>" not in chart_xml
     assert "<tickLblPos" not in chart_xml
+    assert 'cx="4572000"' in drawing_xml
+    assert 'cy="2743200"' in drawing_xml
 
 
 def test_generated_report_rewrites_radar_charts_with_excel_native_xml(tmp_path):
@@ -127,12 +132,20 @@ def test_generated_report_rewrites_radar_charts_with_excel_native_xml(tmp_path):
 
     assert chart_names
     assert '<c:date1904 val="0"' in first_chart_xml
-    assert '<c:lang val="en-US"' in first_chart_xml
+    assert '<c:lang val="zh-CN"' in first_chart_xml
     assert '<c:roundedCorners val="0"' in first_chart_xml
+    assert '<c:style val="2"' in first_chart_xml
     assert '<c:autoTitleDeleted val="0"' in first_chart_xml
-    assert '<c:varyingColors val="0"' in first_chart_xml
+    assert '<c:radarStyle val="marker"' in first_chart_xml
+    assert '<c:varyColors val="0"' in first_chart_xml
     assert '<c:tickLblPos val="nextTo"' in first_chart_xml
     assert "<c:printSettings>" in first_chart_xml
+    assert "<c:legend>" not in first_chart_xml
+    assert '<a:ln w="9525" cap="flat" cmpd="sng" algn="ctr">' in first_chart_xml
+    first_series_xml = first_chart_xml.split("<c:ser>", 1)[1].split("</c:ser>", 1)[0]
+    assert '<a:ln w="28575" cap="rnd">' in first_series_xml
+    assert '<a:schemeClr val="accent1"' in first_series_xml
+    assert "<c:size" not in first_series_xml
 
 
 def test_multiple_sheets_generate_compare_charts_and_output_xlsx(tmp_path):
