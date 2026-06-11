@@ -112,6 +112,29 @@ def test_radar_charts_use_excel_native_defaults(tmp_path):
     assert "<tickLblPos" not in chart_xml
 
 
+def test_generated_report_rewrites_radar_charts_with_excel_native_xml(tmp_path):
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    _add_v2_sheet(workbook, "S1", -10)
+    excel_path = tmp_path / "native_input.xlsx"
+    workbook.save(excel_path)
+
+    result = generate_radar_report(excel_path, tmp_path / "out", ["S1"])
+
+    with zipfile.ZipFile(result.output_path) as archive:
+        chart_names = sorted(name for name in archive.namelist() if name.startswith("xl/charts/chart"))
+        first_chart_xml = archive.read(chart_names[0]).decode("utf-8")
+
+    assert chart_names
+    assert '<c:date1904 val="0"' in first_chart_xml
+    assert '<c:lang val="en-US"' in first_chart_xml
+    assert '<c:roundedCorners val="0"' in first_chart_xml
+    assert '<c:autoTitleDeleted val="0"' in first_chart_xml
+    assert '<c:varyingColors val="0"' in first_chart_xml
+    assert '<c:tickLblPos val="nextTo"' in first_chart_xml
+    assert "<c:printSettings>" in first_chart_xml
+
+
 def test_multiple_sheets_generate_compare_charts_and_output_xlsx(tmp_path):
     workbook = Workbook()
     workbook.remove(workbook.active)
