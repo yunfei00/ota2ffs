@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 from openpyxl import load_workbook
-from PySide6.QtCore import QSettings, Qt, QUrl
+from PySide6.QtCore import QObject, QSettings, QThread, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -39,6 +41,25 @@ MIN_VISIBLE_SHEET_ROWS = 5
 MAX_VISIBLE_SHEET_ROWS = 14
 
 
+class _TaskWorker(QObject):
+    succeeded = Signal(object)
+    failed = Signal(str)
+    done = Signal()
+
+    def __init__(self, task: Callable[[], object]) -> None:
+        super().__init__()
+        self._task = task
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.succeeded.emit(self._task())
+        except Exception:
+            self.failed.emit(traceback.format_exc())
+        finally:
+            self.done.emit()
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -50,6 +71,10 @@ class MainWindow(QMainWindow):
         self.last_output_dir: Path | None = self.output_dir
         self._updating_sheet_item = False
         self._sheet_selection_order: list[str] = []
+        self._task_thread: QThread | None = None
+        self._task_worker: _TaskWorker | None = None
+        self._task_success_handler: Callable[[object], None] | None = None
+        self._task_error_title = ""
         self._build_ui()
         self._apply_styles()
         self._load_last_excel()
@@ -69,16 +94,16 @@ class MainWindow(QMainWindow):
 
         self.excel_edit = QLineEdit()
         self.excel_edit.setReadOnly(True)
-        choose_excel_button = QPushButton("选择 Excel")
-        choose_excel_button.setObjectName("secondaryButton")
-        choose_excel_button.clicked.connect(self.choose_excel)
+        self.choose_excel_button = QPushButton("选择 Excel")
+        self.choose_excel_button.setObjectName("secondaryButton")
+        self.choose_excel_button.clicked.connect(self.choose_excel)
 
         self.output_edit = QLineEdit()
         self.output_edit.setReadOnly(True)
         self.output_edit.setText(str(self.output_dir))
-        choose_output_button = QPushButton("选择输出目录")
-        choose_output_button.setObjectName("secondaryButton")
-        choose_output_button.clicked.connect(self.choose_output_dir)
+        self.choose_output_button = QPushButton("选择输出目录")
+        self.choose_output_button.setObjectName("secondaryButton")
+        self.choose_output_button.clicked.connect(self.choose_output_dir)
         self.open_output_button = QPushButton("打开输出目录")
         self.open_output_button.setObjectName("secondaryButton")
         self.open_output_button.clicked.connect(self.open_output_dir)
@@ -91,10 +116,10 @@ class MainWindow(QMainWindow):
 
         path_layout.addWidget(QLabel("Excel 文件"), 0, 0)
         path_layout.addWidget(self.excel_edit, 0, 1)
-        path_layout.addWidget(choose_excel_button, 0, 2)
+        path_layout.addWidget(self.choose_excel_button, 0, 2)
         path_layout.addWidget(QLabel("输出目录"), 1, 0)
         path_layout.addWidget(self.output_edit, 1, 1)
-        path_layout.addWidget(choose_output_button, 1, 2)
+        path_layout.addWidget(self.choose_output_button, 1, 2)
         path_layout.addWidget(self.open_output_button, 1, 3)
         path_layout.addWidget(QLabel("频率"), 2, 0)
         path_layout.addWidget(self.frequency_edit, 2, 1, 1, 2)
@@ -349,27 +374,26 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "缺少 Sheet", "请至少选择一个 sheet。")
             return
 
-        self.convert_button.setEnabled(False)
-        self.radar_button.setEnabled(False)
-        self.append_log("开始转换...")
-        try:
-            result = convert_excel(
-                self.excel_path,
-                self.output_dir,
+        excel_path = self.excel_path
+        output_dir = self.output_dir
+        frequency_value = self.frequency_edit.text().strip()
+        frequency_unit = self.frequency_unit_combo.currentText()
+
+        def task() -> object:
+            return convert_excel(
+                excel_path,
+                output_dir,
                 sheets,
-                frequency_value=self.frequency_edit.text().strip(),
-                frequency_unit=self.frequency_unit_combo.currentText(),
+                frequency_value=frequency_value,
+                frequency_unit=frequency_unit,
             )
-            for line in result.log_lines:
-                self.append_log(line)
-            if result.log_path is not None:
-                self.append_log(f"日志文件: {result.log_path}")
-            self.last_output_dir = self._conversion_output_dir(result.generated_files)
-            self.append_log(f"可打开目录: {self.last_output_dir}")
-            QMessageBox.information(self, "转换完成", f"转换完成，生成 {result.generated_count} 个文件。")
-        finally:
-            self.convert_button.setEnabled(True)
-            self.radar_button.setEnabled(True)
+
+        self._start_background_task(
+            "开始转换...",
+            "转换失败",
+            task,
+            self._handle_conversion_result,
+        )
 
     def start_radar_report(self) -> None:
         if self.excel_path is None:
@@ -384,30 +408,127 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "缺少 Sheet", "请至少选择一个 sheet。")
             return
 
-        self.convert_button.setEnabled(False)
-        self.radar_button.setEnabled(False)
-        self.append_log("开始生成雷达图报表...")
-        try:
-            result = generate_radar_report(
-                self.excel_path,
-                self.output_dir,
+        excel_path = self.excel_path
+        output_dir = self.output_dir
+        include_delta = self.delta_report_checkbox.isChecked()
+
+        def task() -> object:
+            return generate_radar_report(
+                excel_path,
+                output_dir,
                 sheets,
-                include_delta=self.delta_report_checkbox.isChecked(),
+                include_delta=include_delta,
             )
-            self.append_log(f"解析到矩阵数量: {result.matrix_count}")
-            self.append_log(f"生成单图数量: {result.single_chart_count}")
-            self.append_log(f"生成对比图数量: {result.compare_chart_count}")
-            self.append_log(f"生成差值图数量: {result.delta_chart_count}")
-            self.append_log(f"雷达图报表: {result.output_path}")
-            self.last_output_dir = result.output_path.parent
-            self.append_log(f"可打开目录: {self.last_output_dir}")
-            QMessageBox.information(self, "报表生成完成", f"雷达图报表已生成:\n{result.output_path}")
-        finally:
-            self.convert_button.setEnabled(True)
-            self.radar_button.setEnabled(True)
+
+        self._start_background_task(
+            "开始生成雷达图报表...",
+            "报表生成失败",
+            task,
+            self._handle_radar_report_result,
+        )
 
     def append_log(self, message: str) -> None:
         self.log_output.append(message)
+
+    def closeEvent(self, event) -> None:
+        if self._task_thread is not None:
+            QMessageBox.warning(self, "任务运行中", "当前任务还未完成，请等待处理结束后再关闭窗口。")
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def _start_background_task(
+        self,
+        start_message: str,
+        error_title: str,
+        task: Callable[[], object],
+        on_success: Callable[[object], None],
+    ) -> None:
+        if self._task_thread is not None:
+            QMessageBox.warning(self, "任务运行中", "当前任务还未完成，请稍后再试。")
+            return
+
+        self._set_task_controls_enabled(False)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.append_log(start_message)
+        self.append_log("正在后台处理，界面会保持可响应...")
+
+        thread = QThread(self)
+        worker = _TaskWorker(task)
+        worker.moveToThread(thread)
+
+        self._task_thread = thread
+        self._task_worker = worker
+        self._task_success_handler = on_success
+        self._task_error_title = error_title
+
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._handle_background_success)
+        worker.failed.connect(self._handle_background_failure)
+        worker.done.connect(self._handle_background_done)
+        worker.done.connect(thread.quit)
+        worker.done.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_background_task)
+        thread.start()
+
+    @Slot(object)
+    def _handle_background_success(self, result: object) -> None:
+        if self._task_success_handler is None:
+            return
+        try:
+            self._task_success_handler(result)
+        except Exception:
+            details = traceback.format_exc()
+            self.append_log(f"[失败] UI 更新: {details}")
+            QMessageBox.critical(self, self._task_error_title or "任务失败", details)
+
+    @Slot(str)
+    def _handle_background_failure(self, details: str) -> None:
+        self.append_log(f"[失败] {details}")
+        QMessageBox.critical(self, self._task_error_title or "任务失败", details)
+
+    @Slot()
+    def _handle_background_done(self) -> None:
+        QApplication.restoreOverrideCursor()
+        self._set_task_controls_enabled(True)
+        self.append_log("任务处理结束。")
+        self._task_success_handler = None
+        self._task_error_title = ""
+
+    @Slot()
+    def _clear_background_task(self) -> None:
+        self._task_thread = None
+        self._task_worker = None
+
+    def _set_task_controls_enabled(self, enabled: bool) -> None:
+        self.choose_excel_button.setEnabled(enabled)
+        self.choose_output_button.setEnabled(enabled)
+        self.frequency_edit.setEnabled(enabled)
+        self.frequency_unit_combo.setEnabled(enabled)
+        self.sheet_list.setEnabled(enabled)
+        self.delta_report_checkbox.setEnabled(enabled)
+        self.convert_button.setEnabled(enabled)
+        self.radar_button.setEnabled(enabled)
+
+    def _handle_conversion_result(self, result: object) -> None:
+        for line in result.log_lines:
+            self.append_log(line)
+        if result.log_path is not None:
+            self.append_log(f"日志文件: {result.log_path}")
+        self.last_output_dir = self._conversion_output_dir(result.generated_files)
+        self.append_log(f"可打开目录: {self.last_output_dir}")
+        QMessageBox.information(self, "转换完成", f"转换完成，生成 {result.generated_count} 个文件。")
+
+    def _handle_radar_report_result(self, result: object) -> None:
+        self.append_log(f"解析到矩阵数量: {result.matrix_count}")
+        self.append_log(f"生成单图数量: {result.single_chart_count}")
+        self.append_log(f"生成对比图数量: {result.compare_chart_count}")
+        self.append_log(f"生成差值图数量: {result.delta_chart_count}")
+        self.append_log(f"雷达图报表: {result.output_path}")
+        self.last_output_dir = result.output_path.parent
+        self.append_log(f"可打开目录: {self.last_output_dir}")
+        QMessageBox.information(self, "报表生成完成", f"雷达图报表已生成:\n{result.output_path}")
 
     def _update_sheet_item_label(self, item: QListWidgetItem) -> None:
         if self._updating_sheet_item:
